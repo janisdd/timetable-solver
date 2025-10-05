@@ -30,8 +30,8 @@ classes = {
     #     "mathe": 4,
     # },
     "5a": {
-        "deutsch": 1,
-        "mathe": 1,
+        "deutsch": 3,
+        "mathe": 2,
     },
     # "5b": {
     #     "deutsch": 1,
@@ -42,7 +42,7 @@ classes = {
 # day_week
 days = {
     "montag-1": 4,
-    # "dienstag-1": 4,
+    "dienstag-1": 4,
     # "mittwoch-1": 4,
     # "donnerstag-1": 4,
     # "freitag-1": 4,
@@ -62,17 +62,19 @@ prob = LpProblem("Stundenplan", LpMinimize)
 
 
 # create binary variables
-# [teacher]_[subject]_[day]_[class hour]_[class]
-
-
+# [teacher]_[subject]_[day]_slot_[class hour]_[class]
 def get_var_name(teacher, subject, day, lesson_hour, class_):
     return f"{teacher}_{subject}_{day}_slot_{lesson_hour}_{class_}"
 
-
+# [teacher]_[subject]_[day]_slot_[class hour]_[class]
 def get_var_parts(var_name):
     var_parts = var_name.split("_")
     return var_parts[0], var_parts[1], var_parts[2], int(var_parts[4]), var_parts[5]
 
+# slack var: [class]_[subject]
+def get_slack_var_parts(var_name):
+    var_parts = var_name.split("_")
+    return var_parts[0], var_parts[1]
 
 def get_var_parts_obj(var_name):
     parts = get_var_parts(var_name)
@@ -269,18 +271,26 @@ for teacher_name in all_teachers:
 # e.g. 5a must get 4x deutsch
 # [teacher]_deu_[day]_[class hour]_5a + ... = 4
 c_count = 0
+all_slack_vars = []
 for class_name in all_classes:
     class_with_subjects = classes[class_name]
 
     for subject_name, required_lessons in class_with_subjects.items():  # e.g. deutsch
         var_names = get_all_vars_with_preset(class_=class_name, subject=subject_name)
         var = [all_vars[var_name] for var_name in var_names]
-        c1 = lpSum(var) == required_lessons, f"every class must get all subjects in one year {c_count}"
+
+        s1 = pulp.LpVariable(f"{class_name}_{subject_name}", lowBound=0)  # Slack variable
+        all_slack_vars.append(s1)
+
+        c1 = lpSum(var) + s1 == required_lessons, f"every class must get all subjects in one year {c_count}"
         c_count += 1
         prob += c1
 
 # dummy target function
-prob += 0
+# prob += 0 # no slack
+
+# for slack_var in all_slack_vars:
+prob += lpSum(all_slack_vars)
 
 # prob.writeLP("Stundenplan.lp")
 
@@ -289,12 +299,25 @@ prob.solve()
 # The status of the solution is printed to the screen
 print("Status:", LpStatus[prob.status])
 
+if prob.status != 1:
+    print("No solution found")
+    exit()
+
+
 # Each of the variables is printed with it's resolved optimum value
 for v in prob.variables():
     print(v.name, "=", v.varValue)
 
 print()
 get_stundenplan_from_vars(prob.variables())
+
+# check slack variables
+for slack_var in all_slack_vars:
+    if slack_var.varValue > 0:
+        class_name, subject_name = get_slack_var_parts(slack_var.name)
+        # print("WARNING: Slack variable > 0, not all constraints could be satisfied!")
+        required_lessons = classes[class_name][subject_name]
+        print(f"Klasse {class_name} hat {slack_var.varValue}x zu wenig {subject_name} ({required_lessons-slack_var.varValue}/{required_lessons}.0)")
 
 print()
 print("finished")

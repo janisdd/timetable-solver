@@ -57,6 +57,12 @@ all_teachers = teachers.keys()
 all_classes = classes.keys()
 all_days = days.keys()
 
+maximal_lessons_per_day = -1
+for day_name, max_lesson_hours in days.items():
+    if max_lesson_hours > maximal_lessons_per_day:
+        maximal_lessons_per_day = max_lesson_hours
+
+
 # Create the 'prob' variable to contain the problem data
 prob = LpProblem("Stundenplan", LpMinimize)
 
@@ -145,20 +151,20 @@ def create_empty_timetable():
 
 
 def print_timetable(class_, stundenplan):
-    max_days = 0
-    for day_name, max_lesson_hours in days.items():
-        if max_lesson_hours > max_days:
-            max_days = max_lesson_hours
+    # max_days = 0
+    # for day_name, max_lesson_hours in days.items():
+    #     if max_lesson_hours > max_days:
+    #         max_days = max_lesson_hours
 
     data = []
     table_header = []
-    table_body = [[]] * max_days
+    table_body = [[]] * maximal_lessons_per_day
 
     for i, _ in enumerate(table_body):
         table_body[i] = [""] * (len(all_days) + 1)
 
     table_header.append("Stunden")
-    for lesson_hour in range(1, max_days + 1):
+    for lesson_hour in range(1, maximal_lessons_per_day + 1):
         table_body[lesson_hour - 1][0] = lesson_hour
 
     all_days_list = list(all_days)
@@ -288,12 +294,43 @@ for class_name in all_classes:
 
 # dummy target function
 # prob += 0 # no slack
+# prob += lpSum(all_slack_vars)
+
+
+# favor first days first
+def sort_by_lesson(var_name):
+    parts_obj = get_var_parts_obj(var_name)
+    return parts_obj["lesson_hour"]
+
+
+all_days_list = list(all_days)
+favor_first_days_obj_func_vars = LpAffineExpression(None)
+# var = [all_vars[var_name] for var_name in var_names]
+day_count = 0
+lessons_per_day_counter = 0
+for day_name, max_lessons in days.items():
+
+    # all_lessons_on_day = get_all_vars_with_preset(day=day_name)
+    # all_lessons_on_day.sort(key=sort_by_lesson)
+    day_count += 1
+
+    for lesson_hour in range(1, max_lessons + 1):
+        vars_lesson_slot_day = get_all_vars_with_preset(day=day_name, lesson_hour=lesson_hour)
+
+        lessons_per_day_counter += 1
+        for var_name in vars_lesson_slot_day:
+            var = all_vars[var_name]
+            favor_first_days_obj_func_vars += var * lessons_per_day_counter
+
+        print()
+
 
 # for slack_var in all_slack_vars:
-prob += lpSum(all_slack_vars)
+# make sure slack variables are used last by multiplying with a large number
+prob += favor_first_days_obj_func_vars + lpSum(all_slack_vars) * len(all_var_names)
+# prob += favor_first_days_obj_func_vars
 
-# prob.writeLP("Stundenplan.lp")
-
+prob.writeLP("Stundenplan2.lp")
 prob.solve()
 
 # The status of the solution is printed to the screen

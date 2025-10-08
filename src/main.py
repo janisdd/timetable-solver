@@ -7,10 +7,10 @@ teachers = {
         "deutsch": 3,
         "mathe": 3,
     },
-    # "l2": {
-    #     "mathe": 5,
-    #     "sport": 3,
-    # },
+    "l2": {
+        "mathe": 5,
+        "sport": 3,
+    },
     # "l3": {
     #     "deutsch": 3,
     # },
@@ -55,6 +55,13 @@ internships = {
     ]
 }
 
+# teacher X should teach subject Y only in class Z
+fixed_teacher_subjects_for_class = {
+    "5a": {
+        "mathe": "l2"
+    }
+}
+
 # TODO sanity checks
 # - same subjects
 # - there must be at least one teacher per subject for a class
@@ -70,7 +77,6 @@ for day_name, max_lesson_hours in days.items():
     if max_lesson_hours > maximal_lessons_per_day:
         maximal_lessons_per_day = max_lesson_hours
 
-
 # Create the 'prob' variable to contain the problem data
 prob = LpProblem("Stundenplan", LpMinimize)
 
@@ -80,15 +86,18 @@ prob = LpProblem("Stundenplan", LpMinimize)
 def get_var_name(teacher, subject, day, lesson_hour, class_):
     return f"{teacher}_{subject}_{day}_slot_{lesson_hour}_{class_}"
 
+
 # [teacher]_[subject]_[day]_slot_[class hour]_[class]
 def get_var_parts(var_name):
     var_parts = var_name.split("_")
     return var_parts[0], var_parts[1], var_parts[2], int(var_parts[4]), var_parts[5]
 
+
 # slack var: [class]_[subject]
 def get_slack_var_parts(var_name):
     var_parts = var_name.split("_")
     return var_parts[0], var_parts[1]
+
 
 def get_var_parts_obj(var_name):
     parts = get_var_parts(var_name)
@@ -281,6 +290,19 @@ for teacher_name in all_teachers:
             c_count += 1
             prob += c1
 
+# every class can only have one subject with one teacher at a specific slot
+# e.g. 5a at montag-1 in slot 1 can only have l1 teaching deutsch
+# [teacher]_[subject]_montag-1_1_5a + ... = 1
+c_count = 0
+for class_name in all_classes:
+    for day_name, max_lessons in days.items():
+        for lesson_hour in range(1, max_lessons + 1):
+            var_names = get_all_vars_with_preset(class_=class_name, lesson_hour=lesson_hour, day=day_name)
+            var = [all_vars[var_name] for var_name in var_names]
+            c1 = lpSum(var) <= 1, f"every class can only have one subject with one teacher at a specific slot {c_count}"
+            c_count += 1
+            prob += c1
+
 # every class must get all subjects in one year
 # e.g. 5a must get 4x deutsch
 # [teacher]_deu_[day]_[class hour]_5a + ... = 4
@@ -300,7 +322,6 @@ for class_name in all_classes:
         c_count += 1
         prob += c1
 
-
 # internships
 
 for class_name in all_internships:
@@ -309,6 +330,19 @@ for class_name in all_internships:
         var_names = get_all_vars_with_preset(class_=class_name, day=day_name)
         var = [all_vars[var_name] for var_name in var_names]
         prob += lpSum(var) == 0, f"internships {var_names}, {day_name}"
+
+# TODO is combined with favor monday over friday...
+coefficient = -1000
+fixe_teacher_subjects_for_class = LpAffineExpression(None)
+# fixed teachers with subjects for classes
+for class_name in fixed_teacher_subjects_for_class.keys():
+    subject_teacher_tuple_map = fixed_teacher_subjects_for_class[class_name]
+    for subject_name, teacher_name in subject_teacher_tuple_map.items():
+        var_names = get_all_vars_with_preset(teacher=teacher_name, subject=subject_name, class_=class_name)
+
+        for var_name in var_names:
+            var = all_vars[var_name]
+            fixe_teacher_subjects_for_class += var * coefficient
 
 
 # dummy target function
@@ -343,10 +377,9 @@ for day_name, max_lessons in days.items():
 
         print()
 
-
 # for slack_var in all_slack_vars:
 # make sure slack variables are used last by multiplying with a large number
-prob += favor_first_days_obj_func_vars + lpSum(all_slack_vars) * len(all_var_names)
+prob += favor_first_days_obj_func_vars + fixe_teacher_subjects_for_class + lpSum(all_slack_vars) * len(all_var_names)
 # prob += favor_first_days_obj_func_vars
 
 prob.writeLP("Stundenplan2.lp")
@@ -359,10 +392,10 @@ if prob.status != 1:
     print("No solution found")
     exit()
 
-
 # Each of the variables is printed with it's resolved optimum value
 for v in prob.variables():
-    print(v.name, "=", v.varValue)
+    if v.varValue == 1:
+        print(v.name, "=", v.varValue)
 
 print()
 get_stundenplan_from_vars(prob.variables())
@@ -373,7 +406,8 @@ for slack_var in all_slack_vars:
         class_name, subject_name = get_slack_var_parts(slack_var.name)
         # print("WARNING: Slack variable > 0, not all constraints could be satisfied!")
         required_lessons = classes[class_name][subject_name]
-        print(f"Klasse {class_name} hat {slack_var.varValue}x zu wenig {subject_name} ({required_lessons-slack_var.varValue}/{required_lessons}.0)")
+        print(
+            f"Klasse {class_name} hat {slack_var.varValue}x zu wenig {subject_name} ({required_lessons - slack_var.varValue}/{required_lessons}.0)")
 
 print()
 print("finished")

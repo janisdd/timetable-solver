@@ -43,9 +43,16 @@ classes = {
 days = {
     "montag-1": 4,
     "dienstag-1": 4,
-    # "mittwoch-1": 4,
+    "mittwoch-1": 4,
     # "donnerstag-1": 4,
     # "freitag-1": 4,
+}
+
+# whole day for classes off
+internships = {
+    "5a": [
+        "dienstag-1",
+    ]
 }
 
 # TODO sanity checks
@@ -56,6 +63,7 @@ days = {
 all_teachers = teachers.keys()
 all_classes = classes.keys()
 all_days = days.keys()
+all_internships = internships.keys()
 
 maximal_lessons_per_day = -1
 for day_name, max_lesson_hours in days.items():
@@ -291,6 +299,17 @@ for class_name in all_classes:
         c1 = lpSum(var) + s1 == required_lessons, f"every class must get all subjects in one year {c_count}"
         c_count += 1
         prob += c1
+
+
+# internships
+
+for class_name in all_internships:
+    days_off_names = internships[class_name]
+    for day_name in days_off_names:
+        var_names = get_all_vars_with_preset(class_=class_name, day=day_name)
+        var = [all_vars[var_name] for var_name in var_names]
+        prob += lpSum(var) == 0, f"internships {var_names}, {day_name}"
+
 
 # dummy target function
 # prob += 0 # no slack

@@ -62,6 +62,16 @@ fixed_teacher_subjects_for_class = {
     }
 }
 
+# teacher is sick on day X for [list] lesson hours
+teacher_sick_data = {
+    "l1": {
+        "montag-1": [1,2,3,4],
+        # "montag-1": [2,3,4]
+        "mittwoch-1": [1,2]
+    }
+}
+
+
 # TODO sanity checks
 # - same subjects
 # - there must be at least one teacher per subject for a class
@@ -332,17 +342,49 @@ for class_name in all_internships:
         prob += lpSum(var) == 0, f"internships {var_names}, {day_name}"
 
 # TODO is combined with favor monday over friday...
-coefficient = -1000
-fixe_teacher_subjects_for_class = LpAffineExpression(None)
-# fixed teachers with subjects for classes
+# coefficient = -1000
+# fixe_teacher_subjects_for_class = LpAffineExpression(None)
+# # fixed teachers with subjects for classes
+# for class_name in fixed_teacher_subjects_for_class.keys():
+#     subject_teacher_tuple_map = fixed_teacher_subjects_for_class[class_name]
+#     for subject_name, teacher_name in subject_teacher_tuple_map.items():
+#         var_names = get_all_vars_with_preset(teacher=teacher_name, subject=subject_name, class_=class_name)
+#
+#         for var_name in var_names:
+#             var = all_vars[var_name]
+#             fixe_teacher_subjects_for_class += var * coefficient
+
+# one class should always have the same subject with the same teacher
+# because we don't know which day the teacher will teach, we set all other options to 0
+# e.g. 5a should always be teaching deutsch
+# [teacher]_[subject]_montag-1_1_5a + ... = 1
+c_count = 0
 for class_name in fixed_teacher_subjects_for_class.keys():
     subject_teacher_tuple_map = fixed_teacher_subjects_for_class[class_name]
     for subject_name, teacher_name in subject_teacher_tuple_map.items():
-        var_names = get_all_vars_with_preset(teacher=teacher_name, subject=subject_name, class_=class_name)
+        var_names_with_all_teachers = get_all_vars_with_preset(class_=class_name, subject=subject_name)
+        # now get all other teachers
+        var_names_with_other_teachers = [var_name for var_name in var_names_with_all_teachers if
+                                         teacher_name != get_var_parts_obj(var_name)["teacher"]]
+        var = [all_vars[var_name] for var_name in var_names_with_other_teachers]
+        c1 = lpSum(var) == 0, f"one class should always have the same subject with the same teacher {c_count}"
+        c_count += 1
+        prob += c1
 
-        for var_name in var_names:
-            var = all_vars[var_name]
-            fixe_teacher_subjects_for_class += var * coefficient
+
+# teacher sick data (for day X for [list] lesson hours)
+# set the variables to 0
+# e.g. l1_[subject]_montag-1_1_[class] = 0´
+c_count = 0
+for teacher_name, sick_map in teacher_sick_data.items():
+    for day_name, sick_lesson_hours_list in sick_map.items():
+        for sick_lesson_hour in sick_lesson_hours_list:
+            var_names = get_all_vars_with_preset(teacher=teacher_name, day=day_name, lesson_hour=sick_lesson_hour)
+            var = [all_vars[var_name] for var_name in var_names]
+            c1 = lpSum(var) == 0, f"teacher sick data (for day X for [list] lesson hours) {c_count}"
+            c_count += 1
+            prob += c1
+    print()
 
 
 # dummy target function
@@ -356,6 +398,7 @@ def sort_by_lesson(var_name):
     return parts_obj["lesson_hour"]
 
 
+# TODO this also handles "no holes" like free lessons hours in the middle?
 all_days_list = list(all_days)
 favor_first_days_obj_func_vars = LpAffineExpression(None)
 # var = [all_vars[var_name] for var_name in var_names]
@@ -379,7 +422,8 @@ for day_name, max_lessons in days.items():
 
 # for slack_var in all_slack_vars:
 # make sure slack variables are used last by multiplying with a large number
-prob += favor_first_days_obj_func_vars + fixe_teacher_subjects_for_class + lpSum(all_slack_vars) * len(all_var_names)
+# prob += favor_first_days_obj_func_vars + fixe_teacher_subjects_for_class + lpSum(all_slack_vars) * len(all_var_names)
+prob += favor_first_days_obj_func_vars + lpSum(all_slack_vars) * len(all_var_names)
 # prob += favor_first_days_obj_func_vars
 
 prob.writeLP("Stundenplan2.lp")

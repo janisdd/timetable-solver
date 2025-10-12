@@ -313,27 +313,7 @@ for class_name in all_classes:
             c_count += 1
             prob += c1
 
-# every class must get all subjects in one year
-# e.g. 5a must get 4x deutsch
-# [teacher]_deu_[day]_[class hour]_5a + ... = 4
-c_count = 0
-all_slack_vars = []
-for class_name in all_classes:
-    class_with_subjects = classes[class_name]
-
-    for subject_name, required_lessons in class_with_subjects.items():  # e.g. deutsch
-        var_names = get_all_vars_with_preset(class_=class_name, subject=subject_name)
-        var = [all_vars[var_name] for var_name in var_names]
-
-        s1 = pulp.LpVariable(f"{class_name}_{subject_name}", lowBound=0)  # Slack variable
-        all_slack_vars.append(s1)
-
-        c1 = lpSum(var) + s1 == required_lessons, f"every class must get all subjects in one year {c_count}"
-        c_count += 1
-        prob += c1
-
 # internships
-
 for class_name in all_internships:
     days_off_names = internships[class_name]
     for day_name in days_off_names:
@@ -384,8 +364,26 @@ for teacher_name, sick_map in teacher_sick_data.items():
             c1 = lpSum(var) == 0, f"teacher sick data (for day X for [list] lesson hours) {c_count}"
             c_count += 1
             prob += c1
-    print()
 
+
+# every class must get all subjects in one year
+# e.g. 5a must get 4x deutsch
+# [teacher]_deu_[day]_[class hour]_5a + ... = 4
+c_count = 0
+all_slack_vars = []
+for class_name in all_classes:
+    class_with_subjects = classes[class_name]
+
+    for subject_name, required_lessons in class_with_subjects.items():  # e.g. deutsch
+        var_names = get_all_vars_with_preset(class_=class_name, subject=subject_name)
+        var = [all_vars[var_name] for var_name in var_names]
+
+        s1 = pulp.LpVariable(f"{class_name}_{subject_name}", lowBound=0)  # Slack variable
+        all_slack_vars.append(s1)
+
+        c1 = lpSum(var) + s1 == required_lessons, f"every class must get all subjects in one year {c_count}"
+        c_count += 1
+        prob += c1
 
 # dummy target function
 # prob += 0 # no slack

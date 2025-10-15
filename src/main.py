@@ -12,24 +12,24 @@ teachers = {
     "l1": {
         # "deutsch": 3,
         # "mathe": 3,
-        "total_lessons": 6,
+        "offered_lessons": 3,
         "subjects": ["deutsch", "mathe"]
     },
-    "l2": {
-        # "mathe": 5,
-        # "sport": 3,
-        "total_lessons": 8,
-        "subjects": ["mathe", "sport"]
-    },
-    "l3": {
-        # "deutsch": 3,
-        "total_lessons": 3,
-        "subjects": ["deutsch"]
-    },
+    # "l2": {
+    #     # "mathe": 5,
+    #     # "sport": 3,
+    #     "offered_lessons": 8,
+    #     "subjects": ["mathe", "sport"]
+    # },
+    # "l3": {
+    #     # "deutsch": 3,
+    #     "offered_lessons": 3,
+    #     "subjects": ["deutsch"]
+    # },
     "l4": {
         # "deutsch": 3,
         # "mathe": 4,
-        "total_lessons": 7,
+        "offered_lessons": 4,
         "subjects": ["deutsch", "mathe"]
     },
 }
@@ -45,7 +45,7 @@ classes = {
     # },
     "5a": {
         "deutsch": 3,
-        "mathe": 2,
+        "mathe": 4,
     },
     # "5b": {
     #     "deutsch": 1,
@@ -71,17 +71,17 @@ internships = {
 
 # teacher X should teach subject Y only in class Z
 fixed_teacher_subjects_for_class = {
-    "5a": {
-        "mathe": "l2"
-    }
+    # "5a": {
+    #     "mathe": "l2"
+    # }
 }
 
 # teacher is sick on day X for [list] lesson hours
 teacher_sick_data = {
     "l1": {
-        "montag-1": [1, 2, 3, 4],
+        # "montag-1": [1, 2, 3, 4],
         # "montag-1": [2,3,4]
-        "mittwoch-1": [1, 2]
+        # "mittwoch-1": [1, 2]
     }
 }
 
@@ -96,7 +96,7 @@ all_subjects_backed_by_teachers = set()
 
 # all teachers can only known subjects
 for teacher_name, teacher_info in teachers.items():
-    total_lessons = teacher_info["total_lessons"]
+    offered_lessons = teacher_info["offered_lessons"]
     teacher_subjects = teacher_info["subjects"]
 
     for subject_name in teacher_subjects:
@@ -122,6 +122,8 @@ for class_name, subjects_info in classes.items():
 # TODO
 teacher_avg_lessons = 1000
 
+# all days can have a different number of lessons
+# but for display purposes we need to know the max number of lessons among all days
 maximal_lessons_per_day = -1
 for day_name, max_lesson_hours in days.items():
     if max_lesson_hours > maximal_lessons_per_day:
@@ -143,11 +145,15 @@ def get_var_parts(var_name):
     return var_parts[0], var_parts[1], var_parts[2], int(var_parts[4]), var_parts[5]
 
 
-# slack var: [class]_[subject]
-def get_slack_var_parts(var_name):
+# slack var for class subject requirements: [class]_[subject]
+def get_slack_var_parts__class_subject_requirements(var_name):
     var_parts = var_name.split("_")
     return var_parts[0], var_parts[1]
 
+# f"{teacher_name}_offered_lessons"
+def get_slack_var_parts__teacher_offered_lessons_total(var_name):
+    var_parts = var_name.split("_")
+    return var_parts[0]
 
 def get_var_parts_obj(var_name):
     parts = get_var_parts(var_name)
@@ -162,13 +168,16 @@ def get_var_parts_obj(var_name):
 
 def create_all_var_names():
     all_var_names = []
-    for teacher_key in all_teachers:
-        for subject in teachers[teacher_key].keys():
+    for teacher_name, teacher_info in teachers.items():
+        offered_lessons = teacher_info["offered_lessons"]
+        teacher_subjects = teacher_info["subjects"]
+
+        for subject in teacher_subjects:
             for day in all_days:
                 for class_ in all_classes:
                     max_lesson_hours = days[day]
                     for lesson_hour in range(1, max_lesson_hours + 1):
-                        var_name = get_var_name(teacher_key, subject, day, lesson_hour, class_)
+                        var_name = get_var_name(teacher_name, subject, day, lesson_hour, class_)
                         # print(var_name)
                         all_var_names.append(var_name)
 
@@ -302,10 +311,21 @@ def get_stundenplan_from_vars(all_vars_solved):
 
 ######## constraints
 
+# # the sum of lessons for one teacher cannot exceed the total number of lessons among all subjects
+# not necessarily...
+# for teacher_name, teacher_info in teachers.items():
+#     offered_lessons = teacher_info["offered_lessons"]
+#     teacher_subjects = teacher_info["subjects"]
+#
+#     var_names = get_all_vars_with_preset(teacher=teacher_name)
+#     var = [all_vars[var_name] for var_name in var_names]
+#     c1 = lpSum(var) <= offered_lessons, f"the sum of lessons for one teacher cannot exceed the total number of lessons among all subjects {teacher_name}"
+#     prob += c1
+
 
 # every day can only have a max number of lessons for one class
-# monday 1 has max 4 lessons, so 5a can only have 4 lessons (and any other class too)
-# [teacher]_[subject]_montag-1_1_5a + ... <= 4
+# monday-1 has max 4 lessons, so 5a can only have 4 lessons (and any other class too)
+# [teacher]_[subject]_montag-1_slot_1_5a + ... <= 4
 c_count = 0
 for day_name, max_lessons in days.items():
     for class_name in all_classes:
@@ -409,7 +429,7 @@ for teacher_name, sick_map in teacher_sick_data.items():
 # e.g. 5a must get 4x deutsch
 # [teacher]_deu_[day]_[class hour]_5a + ... = 4
 c_count = 0
-all_slack_vars_for_teacher_lesson_requirements = []
+all_slack_vars_for_class_lesson_requirements = []
 for class_name in all_classes:
     class_with_subjects = classes[class_name]
 
@@ -417,8 +437,8 @@ for class_name in all_classes:
         var_names = get_all_vars_with_preset(class_=class_name, subject=subject_name)
         var = [all_vars[var_name] for var_name in var_names]
 
-        s1 = pulp.LpVariable(f"{class_name}_{subject_name}", lowBound=0)  # Slack variable
-        all_slack_vars_for_teacher_lesson_requirements.append(s1)
+        s1 = pulp.LpVariable(f"{class_name}_{subject_name}_missing_required_lessons", lowBound=0)  # Slack variable
+        all_slack_vars_for_class_lesson_requirements.append(s1)
 
         c1 = lpSum(var) + s1 == required_lessons, f"every class must get all subjects in one year {c_count}"
         c_count += 1
@@ -426,16 +446,29 @@ for class_name in all_classes:
 
 # TODO
 #############################################################################################
-# every teacher should have the same number of averaged lessons overall
-# TODO per subject or over all subjects??
-# assumed: over all subjects of the teacher (no matter how many he has)
-# c_count = 0
-# all_slack_vars_for_teacher_lesson_requirements = []
-#
-# for teacher_name in all_teachers:
-#     teacher_with_subjects = teachers[teacher_name]
-#
-# teacher_avg_lessons
+# every teacher should have his offered lessons
+# simple: every teacher should do his required lessons, everything too much is captured in slack var -> minimize slack
+c_count = 0
+all_slack_vars_for_teacher_lesson_requirements = []
+sub_teacher_lesson_requirements = []
+
+for teacher_name, teacher_info in teachers.items():
+    offered_lessons = teacher_info["offered_lessons"]
+    teacher_subjects = teacher_info["subjects"]
+
+    var_names = get_all_vars_with_preset(teacher=teacher_name)
+    var = [all_vars[var_name] for var_name in var_names]
+
+    s1 = pulp.LpVariable(f"{teacher_name}_missing_offered_lessons", lowBound=0)  # Slack variable
+    all_slack_vars_for_teacher_lesson_requirements.append(s1)
+
+    # TODO this means teachers with more offered lessons will always get their lessons...
+    # sub_teacher_lesson_requirements.append(s1 * offered_lessons)
+    sub_teacher_lesson_requirements.append(s1)
+
+    c1 = lpSum(var) + s1 == offered_lessons, f"every teacher should have approx his offered lessons in total {c_count}"
+    c_count += 1
+    prob += c1
 
 
 # dummy target function
@@ -474,7 +507,11 @@ for day_name, max_lessons in days.items():
 # for slack_var in all_slack_vars:
 # make sure slack variables are used last by multiplying with a large number
 # prob += favor_first_days_obj_func_vars + fixe_teacher_subjects_for_class + lpSum(all_slack_vars) * len(all_var_names)
-prob += favor_first_days_obj_func_vars + lpSum(all_slack_vars_for_teacher_lesson_requirements) * len(all_var_names)
+# prob += favor_first_days_obj_func_vars + lpSum(all_slack_vars_for_class_lesson_requirements) * len(all_var_names)
+prob += (favor_first_days_obj_func_vars +
+         lpSum(all_slack_vars_for_class_lesson_requirements) * len(all_var_names) +
+         lpSum(sub_teacher_lesson_requirements)
+         )
 # prob += favor_first_days_obj_func_vars
 
 prob.writeLP("Stundenplan2.lp")
@@ -496,13 +533,23 @@ print()
 get_stundenplan_from_vars(prob.variables())
 
 # check slack variables
-for slack_var in all_slack_vars_for_teacher_lesson_requirements:
+for slack_var in all_slack_vars_for_class_lesson_requirements:
     if slack_var.varValue > 0:
-        class_name, subject_name = get_slack_var_parts(slack_var.name)
+        class_name, subject_name = get_slack_var_parts__class_subject_requirements(slack_var.name)
         # print("WARNING: Slack variable > 0, not all constraints could be satisfied!")
         required_lessons = classes[class_name][subject_name]
         print(
-            f"Klasse {class_name} hat {slack_var.varValue}x zu wenig {subject_name} ({required_lessons - slack_var.varValue}/{required_lessons}.0)")
+            f"Klasse {class_name} hat {int(slack_var.varValue)}x zu wenig {subject_name} (hat {int(required_lessons) - int(slack_var.varValue)}/{int(required_lessons)})")
+
+
+for slack_var in all_slack_vars_for_teacher_lesson_requirements:
+    if slack_var.varValue > 0:
+        teacher_name = get_slack_var_parts__teacher_offered_lessons_total(slack_var.name)
+        offered_lessons = teachers[teacher_name]["offered_lessons"]
+        # print("WARNING: Slack variable > 0, not all constraints could be satisfied!")
+        print(
+            f"Lehrer {teacher_name} hat {int(slack_var.varValue)}x zu wenig Unterricht (hat {int(offered_lessons) - int(slack_var.varValue)}/{int(offered_lessons)})")
+
 
 print()
 print("finished")

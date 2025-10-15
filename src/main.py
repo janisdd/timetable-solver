@@ -1,22 +1,36 @@
 from pulp import *
 from tabulate import tabulate
 
+all_known_subjects = [
+    "deutsch",
+    "mathe",
+    "sport"
+]
+
 # how many lessons per subject a teacher can/must teach
 teachers = {
     "l1": {
-        "deutsch": 3,
-        "mathe": 3,
+        # "deutsch": 3,
+        # "mathe": 3,
+        "total_lessons": 6,
+        "subjects": ["deutsch", "mathe"]
     },
     "l2": {
-        "mathe": 5,
-        "sport": 3,
+        # "mathe": 5,
+        # "sport": 3,
+        "total_lessons": 8,
+        "subjects": ["mathe", "sport"]
     },
     "l3": {
-        "deutsch": 3,
+        # "deutsch": 3,
+        "total_lessons": 3,
+        "subjects": ["deutsch"]
     },
     "l4": {
-        "deutsch": 3,
-        "mathe": 4,
+        # "deutsch": 3,
+        # "mathe": 4,
+        "total_lessons": 7,
+        "subjects": ["deutsch", "mathe"]
     },
 }
 
@@ -65,24 +79,45 @@ fixed_teacher_subjects_for_class = {
 # teacher is sick on day X for [list] lesson hours
 teacher_sick_data = {
     "l1": {
-        "montag-1": [1,2,3,4],
+        "montag-1": [1, 2, 3, 4],
         # "montag-1": [2,3,4]
-        "mittwoch-1": [1,2]
+        "mittwoch-1": [1, 2]
     }
 }
-
-
-
-
-# TODO sanity checks
-# - same subjects
-# - there must be at least one teacher per subject for a class
-# - warning, when a teacher has a subject that is not needed by any class
 
 all_teachers = teachers.keys()
 all_classes = classes.keys()
 all_days = days.keys()
 all_internships = internships.keys()
+
+all_subjects_backed_by_teachers = set()
+
+# --- START sanity checks
+
+# all teachers can only known subjects
+for teacher_name, teacher_info in teachers.items():
+    total_lessons = teacher_info["total_lessons"]
+    teacher_subjects = teacher_info["subjects"]
+
+    for subject_name in teacher_subjects:
+        all_subjects_backed_by_teachers.add(subject_name)
+        if subject_name not in all_known_subjects:
+            raise Exception(f"warning: teacher {teacher_name} has unknown subject '{subject_name}'")
+
+# all classes can only known subjects
+for class_name, subjects_info in classes.items():
+    for subject_name, required_lessons_count in subjects_info.items():
+        if subject_name not in all_known_subjects:
+            raise Exception(f"warning: class {class_name} has unknown subject '{subject_name}'")
+
+
+# every subject in every class must have at least one teacher that can teach it
+for class_name, subjects_info in classes.items():
+    for subject_name, required_lessons_count in subjects_info.items():
+        if subject_name not in all_subjects_backed_by_teachers:
+            raise Exception(f"warning: class {class_name} has subject '{subject_name}' that is not backed by any teacher")
+
+# --- END sanity checks
 
 # TODO
 teacher_avg_lessons = 1000
@@ -356,7 +391,6 @@ for class_name in fixed_teacher_subjects_for_class.keys():
         c_count += 1
         prob += c1
 
-
 # teacher sick data (for day X for [list] lesson hours)
 # set the variables to 0
 # e.g. l1_[subject]_montag-1_1_[class] = 0´
@@ -369,7 +403,6 @@ for teacher_name, sick_map in teacher_sick_data.items():
             c1 = lpSum(var) == 0, f"teacher sick data (for day X for [list] lesson hours) {c_count}"
             c_count += 1
             prob += c1
-
 
 # every class should get all subjects in one year
 # because this is a slack var, we minimize it -> we try to meet this goal
@@ -391,17 +424,19 @@ for class_name in all_classes:
         c_count += 1
         prob += c1
 
-
+# TODO
+#############################################################################################
 # every teacher should have the same number of averaged lessons overall
 # TODO per subject or over all subjects??
 # assumed: over all subjects of the teacher (no matter how many he has)
-c_count = 0
-all_slack_vars_for_teacher_lesson_requirements = []
+# c_count = 0
+# all_slack_vars_for_teacher_lesson_requirements = []
+#
+# for teacher_name in all_teachers:
+#     teacher_with_subjects = teachers[teacher_name]
+#
+# teacher_avg_lessons
 
-for teacher_name in all_teachers:
-    teacher_with_subjects = teachers[teacher_name]
-
-teacher_avg_lessons
 
 # dummy target function
 # prob += 0 # no slack

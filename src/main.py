@@ -11,13 +11,13 @@ teachers = {
         "mathe": 5,
         "sport": 3,
     },
-    # "l3": {
-    #     "deutsch": 3,
-    # },
-    # "l4": {
-    #     "deutsch": 3,
-    #     "mathe": 4,
-    # },
+    "l3": {
+        "deutsch": 3,
+    },
+    "l4": {
+        "deutsch": 3,
+        "mathe": 4,
+    },
 }
 
 classes = {
@@ -72,6 +72,8 @@ teacher_sick_data = {
 }
 
 
+
+
 # TODO sanity checks
 # - same subjects
 # - there must be at least one teacher per subject for a class
@@ -81,6 +83,9 @@ all_teachers = teachers.keys()
 all_classes = classes.keys()
 all_days = days.keys()
 all_internships = internships.keys()
+
+# TODO
+teacher_avg_lessons = 1000
 
 maximal_lessons_per_day = -1
 for day_name, max_lesson_hours in days.items():
@@ -366,11 +371,12 @@ for teacher_name, sick_map in teacher_sick_data.items():
             prob += c1
 
 
-# every class must get all subjects in one year
+# every class should get all subjects in one year
+# because this is a slack var, we minimize it -> we try to meet this goal
 # e.g. 5a must get 4x deutsch
 # [teacher]_deu_[day]_[class hour]_5a + ... = 4
 c_count = 0
-all_slack_vars = []
+all_slack_vars_for_teacher_lesson_requirements = []
 for class_name in all_classes:
     class_with_subjects = classes[class_name]
 
@@ -379,11 +385,23 @@ for class_name in all_classes:
         var = [all_vars[var_name] for var_name in var_names]
 
         s1 = pulp.LpVariable(f"{class_name}_{subject_name}", lowBound=0)  # Slack variable
-        all_slack_vars.append(s1)
+        all_slack_vars_for_teacher_lesson_requirements.append(s1)
 
         c1 = lpSum(var) + s1 == required_lessons, f"every class must get all subjects in one year {c_count}"
         c_count += 1
         prob += c1
+
+
+# every teacher should have the same number of averaged lessons overall
+# TODO per subject or over all subjects??
+# assumed: over all subjects of the teacher (no matter how many he has)
+c_count = 0
+all_slack_vars_for_teacher_lesson_requirements = []
+
+for teacher_name in all_teachers:
+    teacher_with_subjects = teachers[teacher_name]
+
+teacher_avg_lessons
 
 # dummy target function
 # prob += 0 # no slack
@@ -421,7 +439,7 @@ for day_name, max_lessons in days.items():
 # for slack_var in all_slack_vars:
 # make sure slack variables are used last by multiplying with a large number
 # prob += favor_first_days_obj_func_vars + fixe_teacher_subjects_for_class + lpSum(all_slack_vars) * len(all_var_names)
-prob += favor_first_days_obj_func_vars + lpSum(all_slack_vars) * len(all_var_names)
+prob += favor_first_days_obj_func_vars + lpSum(all_slack_vars_for_teacher_lesson_requirements) * len(all_var_names)
 # prob += favor_first_days_obj_func_vars
 
 prob.writeLP("Stundenplan2.lp")
@@ -443,7 +461,7 @@ print()
 get_stundenplan_from_vars(prob.variables())
 
 # check slack variables
-for slack_var in all_slack_vars:
+for slack_var in all_slack_vars_for_teacher_lesson_requirements:
     if slack_var.varValue > 0:
         class_name, subject_name = get_slack_var_parts(slack_var.name)
         # print("WARNING: Slack variable > 0, not all constraints could be satisfied!")

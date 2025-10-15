@@ -444,7 +444,6 @@ for class_name in all_classes:
         c_count += 1
         prob += c1
 
-# TODO
 #############################################################################################
 # every teacher should have his offered lessons
 # simple: every teacher should do his required lessons, everything too much is captured in slack var -> minimize slack
@@ -462,7 +461,6 @@ for teacher_name, teacher_info in teachers.items():
     s1 = pulp.LpVariable(f"{teacher_name}_missing_offered_lessons", lowBound=0)  # Slack variable
     all_slack_vars_for_teacher_lesson_requirements.append(s1)
 
-    # TODO this means teachers with more offered lessons will always get their lessons...
     # sub_teacher_lesson_requirements.append(s1 * offered_lessons)
     sub_teacher_lesson_requirements.append(s1)
 

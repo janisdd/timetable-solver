@@ -34,6 +34,25 @@ teachers = {
     },
 }
 
+# read file data/teachers.txt
+# with open("data/teachers.txt", "r") as f:
+#     lines = f.readlines()
+#     for line in lines:
+#         line = line.strip()
+#         if line == "":
+#             continue
+#         teacher_last, teacher_first, teacher_key, offered_lessons = line.split("\t")
+#         offered_lessons_int = float(offered_lessons.replace(",", "."))
+#
+#         teachers[teacher_key] = {
+#             "last_name": teacher_last,
+#             "first_name": teacher_first,
+#             "offered_lessons": int(offered_lessons_int),
+#             "subjects": []
+#         }
+
+print("[WARNING] casted all offered lessons from float to int")
+
 classes = {
     # "5a": {
     #     "deutsch": 4,
@@ -76,10 +95,22 @@ fixed_teacher_subjects_for_class = {
     # }
 }
 
+# whitelist
+teacher_fixed_data = {
+    "l1": {
+        "montag-1": {
+            "_class": "5a",
+            "subject": 'deutsch',
+            "slots": [1,2,3,4]
+        }
+    }
+}
+
+# blacklist
 # teacher is sick on day X for [list] lesson hours
 teacher_sick_data = {
     "l1": {
-        # "montag-1": [1, 2, 3, 4],
+        # "montag-1": [1],
         # "montag-1": [2,3,4]
         # "mittwoch-1": [1, 2]
     }
@@ -93,6 +124,58 @@ all_internships = internships.keys()
 all_subjects_backed_by_teachers = set()
 
 # --- START sanity checks
+
+for teacher_name, fixed_data in teacher_fixed_data.items():
+
+    teacher_fixed_slots_count = 0
+    teacher_offered_lessons_count = teachers[teacher_name]["offered_lessons"]
+
+    if teacher_name not in all_teachers:
+        raise Exception(f"warning: teacher {teacher_name} is not in the teachers list")
+
+    for day, data in fixed_data.items():
+        if day not in all_days:
+            raise Exception(f"warning: teacher {teacher_name} has fixed data for day '{day}' that is not a day")
+
+        subject = data["subject"]
+        if subject not in all_known_subjects:
+            raise Exception(f"warning: teacher {teacher_name} has fixed data for subject '{subject}' that is not known")
+
+        fixed_slots = data["slots"]
+        for slot in fixed_slots:
+            if slot not in range(1, days[day] + 1):
+                raise Exception(f"warning: teacher {teacher_name} has fixed data for slot '{slot}' that is not in range 1-{days[day]}")
+
+        _class = data["_class"]
+        if _class not in all_classes:
+            raise Exception(f"warning: teacher {teacher_name} has fixed data for class '{_class}' that is not in the classes list")
+
+        # class must support this subject
+        if subject not in classes[_class]:
+            raise Exception(f"warning: teacher {teacher_name} has fixed data for subject '{subject}' that is not known")
+
+        # teache must support this subject
+
+        if subject not in teachers[teacher_name]["subjects"]:
+            raise Exception(f"warning: teacher {teacher_name} has fixed data for subject '{subject}' that is not known")
+
+        # must not conflict with teacher sick data (blacklist)
+        if teacher_name not in teacher_sick_data:
+            continue
+
+        sick_data = teacher_sick_data[teacher_name]
+        if day in sick_data:
+            sick_slots = sick_data[day]
+            slot_intersection = list(set(fixed_slots) & set(sick_slots))
+
+            if len(slot_intersection) > 0:
+                raise Exception(f"warning: teacher {teacher_name} has fixed data slots {fixed_slots} that conflict with sick slots {sick_slots} on day '{day}'")
+
+        teacher_fixed_slots_count += len(fixed_slots)
+
+    if teacher_fixed_slots_count > teacher_offered_lessons_count:
+        raise Exception(f"teacher {teacher_name} has fixed slots {teacher_fixed_slots_count} that exceed offered lessons {teacher_offered_lessons_count}")
+
 
 # all teachers can only known subjects
 for teacher_name, teacher_info in teachers.items():
@@ -421,6 +504,24 @@ for teacher_name, sick_map in teacher_sick_data.items():
             var_names = get_all_vars_with_preset(teacher=teacher_name, day=day_name, lesson_hour=sick_lesson_hour)
             var = [all_vars[var_name] for var_name in var_names]
             c1 = lpSum(var) == 0, f"teacher sick data (for day X for [list] lesson hours) {c_count}"
+            c_count += 1
+            prob += c1
+
+
+# teacher fixed data (teacher X want subject Y for class Z at day A in slots [list])
+# set the variables to 1
+# e.g. l1_deu_montag-1_2_5a = 1
+c_count = 0
+for teacher_name, fixed_map in teacher_fixed_data.items():
+    for day_name, data in fixed_map.items():
+        class_name = data["_class"]
+        subject_name = data["subject"]
+        slots_list = data["slots"]
+        for slot in slots_list:
+            var_names = get_all_vars_with_preset(teacher=teacher_name, subject=subject_name, day=day_name,
+                                                lesson_hour=slot, class_=class_name)
+            var = [all_vars[var_name] for var_name in var_names]
+            c1 = lpSum(var) == 1, f"teacher fixed data (teacher X want subject Y for class Z at day A in slots [list]) {c_count}"
             c_count += 1
             prob += c1
 

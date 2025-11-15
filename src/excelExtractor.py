@@ -5,6 +5,7 @@ from openpyxl.cell import MergedCell
 wb = openpyxl.load_workbook('example/SJ 25-26_Gesamtübersicht Einsatz Lehrkräfte EA Halle 2025-05-21_3.xlsx',
                             read_only=False)
 
+teacher_row_start = 10
 
 # teachers start at row 10, col B - E
 # subjects start at col J, row 6
@@ -86,6 +87,7 @@ def extract_classes_with_data_from_sheet(ws):
 
         class_obj = {
             "name": str.join("\n", class_name_lines),
+            "name_fields": class_name_lines,
             "col_range": [range_class_name[0], range_class_name[2]],
             "subjects" : [], # {"name", "col", "coord"}
             "fake_subjects": []
@@ -112,6 +114,9 @@ def extract_classes_with_data_from_sheet(ws):
                 "name": subject_cell.value,
                 "col": subject_cell.column,
                 "coord": subject_cell.coordinate,
+                "hours_total": subject_hours_total.value,
+                "hours_term": subject_hours_term.value,
+                "teachers_with_hours": [] # {"teacher_key", "hours"}
             }
 
             if subject_hours_term.value is None:
@@ -120,25 +125,65 @@ def extract_classes_with_data_from_sheet(ws):
             else:
                 class_obj["subjects"].append(subject_obj)
 
-
-
     return all_classes
 
+def extract_and_set_teacher_hours_from_sheet(ws, all_classes, all_teachers_list):
 
-# first_class.coordinate
+    for class_obj in all_classes:
+        subject_objs = class_obj["subjects"]
+        for subject_obj in subject_objs:
+            subject_col = subject_obj["col"]
+
+            for row_index, teacher_obj in enumerate(all_teachers_list):
+                hours_for_teacher_cell = ws.cell(row=teacher_row_start + row_index, column=subject_col)
+
+                if hours_for_teacher_cell.value is None:
+                    continue
+
+                subject_obj["teachers_with_hours"].append({
+                    "teacher_key": teacher_obj["key"],
+                    "hours": hours_for_teacher_cell.value
+                })
+
+
+def get_all_teachers_from_rect_data(teacher_datas):
+
+    all_teachers_dict = {}
+    all_teachers_list = []
+
+    for teacher_data in teacher_datas:
+        i = 0
+        contract_form = teacher_data[i]
+        i+=1
+        last_name = teacher_data[i]
+        i += 1
+        first_name = teacher_data[i]
+        i += 1
+        teacher_key = teacher_data[i]
+        teacher_obj = {
+            "contract_form": contract_form,
+            "last_name": last_name,
+            "first_name": first_name,
+            "key": teacher_key
+        }
+        all_teachers_dict[teacher_key] = teacher_obj
+        all_teachers_list.append(teacher_obj)
+
+    return all_teachers_list, all_teachers_dict
 
 def extract_all_data_from_sheet(ws):
     # key is "teacher key" (or nummer in excel/german)
     # value is hash with data
     teachers = dict()
 
-    teacher_start_row = 10
     teacher_end_row = 100
-    teacher_start_col = 3
+    teacher_start_col = 2
     teacher_end_col = 5
-    teacher_datas = get_excel_rect_data_as_array(ws, teacher_start_row, teacher_end_row, teacher_start_col,
+    teacher_datas = get_excel_rect_data_as_array(ws, teacher_row_start, teacher_end_row, teacher_start_col,
                                                  teacher_end_col)
-    extract_classes_with_data_from_sheet(ws)
+    all_teachers_list, all_teachers_dict = get_all_teachers_from_rect_data(teacher_datas)
+    all_classes = extract_classes_with_data_from_sheet(ws)
+    extract_and_set_teacher_hours_from_sheet(ws, all_classes, all_teachers_list)
 
     for teacher_data in teacher_datas:
         first_name = teacher_data[0]

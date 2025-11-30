@@ -1,11 +1,11 @@
 # https://openpyxl.readthedocs.io/en/stable/tutorial.html
+import json
+
 import openpyxl
 from openpyxl.cell import MergedCell
 
-wb = openpyxl.load_workbook('example/SJ 25-26_Gesamtübersicht Einsatz Lehrkräfte EA Halle 2025-05-21_3.xlsx',
-                            read_only=False)
-
 teacher_row_start = 10
+
 
 # teachers start at row 10, col B - E
 # subjects start at col J, row 6
@@ -45,7 +45,7 @@ def extract_classes_with_data_from_sheet(ws):
     start_col = 10  # J
     subjects_start_row = 6
     subjects_hours_year = 7
-    subjects_hours_term = 9 # for one half year (one term/semester)
+    subjects_hours_term = 9  # for one half year (one term/semester)
 
     all_classes = []
     curr_class = ws.cell(row=start_row, column=start_col)  # J3
@@ -89,7 +89,7 @@ def extract_classes_with_data_from_sheet(ws):
             "name": str.join("\n", class_name_lines),
             "name_fields": class_name_lines,
             "col_range": [range_class_name[0], range_class_name[2]],
-            "subjects" : [], # {"name", "col", "coord"}
+            "subjects": [],  # {"name", "col", "coord"}
             "fake_subjects": []
         }
         all_classes.append(class_obj)
@@ -116,7 +116,7 @@ def extract_classes_with_data_from_sheet(ws):
                 "coord": subject_cell.coordinate,
                 "hours_total": subject_hours_total.value,
                 "hours_term": subject_hours_term.value,
-                "teachers_with_hours": [] # {"teacher_key", "hours"}
+                "teachers_with_hours": []  # {"teacher_key", "hours"}
             }
 
             if subject_hours_term.value is None:
@@ -127,8 +127,8 @@ def extract_classes_with_data_from_sheet(ws):
 
     return all_classes
 
-def extract_and_set_teacher_hours_from_sheet(ws, all_classes, all_teachers_list):
 
+def extract_and_set_teacher_hours_from_sheet(ws, all_classes, all_teachers_list):
     for class_obj in all_classes:
         subject_objs = class_obj["subjects"]
         for subject_obj in subject_objs:
@@ -147,14 +147,13 @@ def extract_and_set_teacher_hours_from_sheet(ws, all_classes, all_teachers_list)
 
 
 def get_all_teachers_from_rect_data(teacher_datas):
-
     all_teachers_dict = {}
     all_teachers_list = []
 
     for teacher_data in teacher_datas:
         i = 0
         contract_form = teacher_data[i]
-        i+=1
+        i += 1
         last_name = teacher_data[i]
         i += 1
         first_name = teacher_data[i]
@@ -171,6 +170,7 @@ def get_all_teachers_from_rect_data(teacher_datas):
 
     return all_teachers_list, all_teachers_dict
 
+
 def extract_all_data_from_sheet(ws):
     # key is "teacher key" (or nummer in excel/german)
     # value is hash with data
@@ -185,30 +185,157 @@ def extract_all_data_from_sheet(ws):
     all_classes = extract_classes_with_data_from_sheet(ws)
     extract_and_set_teacher_hours_from_sheet(ws, all_classes, all_teachers_list)
 
-    for teacher_data in teacher_datas:
-        first_name = teacher_data[0]
-        last_name = teacher_data[1]
-        teacher_key = teacher_data[2]
-        teachers[teacher_key] = {
-            "first_name": first_name,
-            "last_name": last_name,
-            "key": teacher_key
-        }
+    return {
+        "all_teachers_list": all_teachers_list,
+        "all_teachers_dict": all_teachers_dict,
+    }
 
-    ws.cell(row=4, column=2)
+
+def extract_single_teacher_preferences_from_sheet(ws, teacher_obj):
+    start_col = 3  # C, here is also the name of the class and time slots
+    end_col = 7  # G
+
+    start_row = 2  # first time slot
+    end_row = 10  # last time slot
+
+    date_cells = []
+
+    # C2 - G2 are the dates
+    for i in range(start_col, end_col + 1):
+        date_cell = ws.cell(row=start_row, column=i)
+        date_cells.append(date_cell.value)
+
+    preferences_cells = []  # 2d, column wise
+
+    # real data
+    for col_i in range(start_col, end_col + 1):
+        day_slots = []
+        for row_j in range(start_row + 1, end_row + 1):
+            pref_cell = ws.cell(row=row_j, column=col_i)
+            day_slots.append(pref_cell.value)
+        preferences_cells.append(day_slots)
 
     pass
 
 
+def extract_subject_mapping_from_sheet(ws_dozenten, all_teachers_dict):
+    start_col = 1
+    max_col = 100
+    # no end col, we read until we find a class without a trailing dot
+    start_row = 1
+    max_row = 100
+
+    subject_teacher_pair_by_class_name_dict = {}
+
+    for col_i in range(start_col, max_col):
+        class_name_cell = ws_dozenten.cell(row=start_row, column=col_i)
+        class_name = class_name_cell.value
+
+        subject_teacher_pair = []
+        subject_teacher_pair_by_class_name_dict[class_name] = subject_teacher_pair
+
+        for row_j in range(start_row + 1, max_row):
+            subject_teacher_pair_cell = ws_dozenten.cell(row=row_j, column=col_i)
+            value = subject_teacher_pair_cell.value
+
+            # value is a pair, e.g. Eth(Bor) -> Eth, Bor
+            if value is not None:
+                # print(f"{subject_teacher_pair_cell.coordinate} = {value}")
+
+                # if the value does not contain "(", ignore
+                if "(" not in value:
+                    print(f"warning: subject teacher pair does not contain '(' for class {class_name}")
+                    continue
+
+                subject, teacher = value.split("(")
+                teacher_key = teacher.strip(")")
+
+                if teacher_key is "":
+                    print(f"warning: teacher key is empty for subject {subject} for class {class_name}")
+                    continue
+                if teacher_key not in all_teachers_dict:
+                    print(f"warning: teacher key {teacher_key} not found for subject {subject} for class {class_name}")
+                    continue
+
+                subject_teacher_pair.append({"subject": subject, "teacher_key": teacher_key})
+
+    return subject_teacher_pair_by_class_name_dict
+
+
+def extract_teachers_preferences_from_sheet(wb_prefs, all_teachers_dict):
+    dozentne_worksheet = wb_prefs["Dozenten"]
+    mapping = extract_subject_mapping_from_sheet(dozentne_worksheet, all_teachers_dict)
+
+    # each teacher has a separate sheet with it's key
+    # tuple of worksheet and teacher key
+    relevant_work_sheets = []
+
+    for sheet in wb_prefs:
+        worksheet_name = sheet.title  # to lower?
+
+        if worksheet_name in all_teachers_dict:
+            relevant_work_sheets.append((sheet, worksheet_name))
+
+    for sheet, teacher_key in relevant_work_sheets:
+        teacher_obj = all_teachers_dict[teacher_key]
+        extract_single_teacher_preferences_from_sheet(sheet, teacher_obj)
+
+    return None
+
+
 def main():
+    wb = openpyxl.load_workbook('example/SJ 25-26_Gesamtübersicht Einsatz Lehrkräfte EA Halle 2025-05-21_3.xlsx',
+                                read_only=False)
+    worksheet_blacklist = ["variablen", "kumuliert"]
+    all_relevant_work_sheets = []
+
     # for sheet in wb:
+    #     worksheet_name = sheet.title.lower()
+    #     is_relevant = True
+    #     for blacklisted_name in worksheet_blacklist:
+    #         if blacklisted_name in worksheet_name:
+    #             is_relevant = False
+    #             break
+    #
+    #     if not is_relevant:
+    #         continue
+    #     all_relevant_work_sheets.append(sheet)
     #     print(sheet.title)
 
-    ws = wb['KP 25_26']
-    data = extract_all_data_from_sheet(ws)
-    # print(ws['A4'])
-    # print(ws.cell(row=4, column=2))
-    # print(data)
+    all_teachers_list = []
+    all_teachers_dict = {}
+    #
+    #
+    # # ws = wb['KP 25_26']
+    # for ws in all_relevant_work_sheets:
+    #     data = extract_all_data_from_sheet(ws)
+    #     for teacher_obj in data["all_teachers_list"]:
+    #         teacher_key = teacher_obj["key"]
+    #         if teacher_key not in all_teachers_dict:
+    #             all_teachers_dict[teacher_key] = teacher_obj
+    #             all_teachers_list.append(teacher_obj)
+    #         else:
+    #             pass
+    #     break
+    #
+    # # write to json file
+    # teacher_data_json = json.dumps(all_teachers_list, indent=4)
+    # with open('example/all_teachers.json', 'w') as outfile:
+    #     outfile.write(teacher_data_json)
+
+    # read from json file
+    with open('example/all_teachers.json', 'r') as infile:
+        all_teachers_list = json.load(infile)
+
+        for teacher_obj in all_teachers_list:
+            teacher_key = teacher_obj["key"]
+            all_teachers_dict[teacher_key] = teacher_obj
+
+    wb_teachers_preferences = openpyxl.load_workbook('example/07_KW 45_03.11.-07.11.2025_IN.xlsm',
+                                                     read_only=False, data_only=True)
+
+    extract_teachers_preferences_from_sheet(wb_teachers_preferences, all_teachers_dict)
+
     print("finished")
 
 

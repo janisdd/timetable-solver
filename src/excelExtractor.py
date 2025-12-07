@@ -191,7 +191,30 @@ def extract_all_data_from_sheet(ws):
     }
 
 
-def extract_single_teacher_preferences_from_sheet(ws, teacher_obj):
+def extract_teacher_available_color_mapping(wb_prefs):
+    # excel uses aarrggbb for colors, use fgColor in fill!! (bg is for patterns)
+    ws_color_legend = wb_prefs["Tabelle1"]
+    mapping_allowed_row = 23
+    mapping_allowed_col = 2
+
+    mapping_allowed_cell = ws_color_legend.cell(row=mapping_allowed_row, column=mapping_allowed_col)
+    allowed_color = mapping_allowed_cell.fill.fgColor
+
+    mapping_not_allowed_row = 24
+    mapping_not_allowed_col = 2
+
+    mapping_not_allowed_cell = ws_color_legend.cell(row=mapping_not_allowed_row, column=mapping_not_allowed_col)
+    mapping_not_allowed_color = mapping_not_allowed_cell.fill.fgColor
+
+    print(f"allowed color: {allowed_color}")
+    print(f"not allowed color: {mapping_not_allowed_color}")
+
+    return {
+        "allowed_bg_color": allowed_color,
+        "not_allowed_bg_color": mapping_not_allowed_color
+    }
+
+def extract_single_teacher_preferences_from_sheet(ws, teacher_obj, color_legend_teacher_availability):
     start_col = 3  # C, here is also the name of the class and time slots
     end_col = 7  # G
 
@@ -207,12 +230,31 @@ def extract_single_teacher_preferences_from_sheet(ws, teacher_obj):
 
     preferences_cells = []  # 2d, column wise
 
+    has_known_color = None
+
     # real data
     for col_i in range(start_col, end_col + 1):
         day_slots = []
         for row_j in range(start_row + 1, end_row + 1):
             pref_cell = ws.cell(row=row_j, column=col_i)
-            day_slots.append(pref_cell.value)
+
+            cell_obj = {
+                "slot_index": pref_cell.row - (start_row + 1),
+                "class_name": pref_cell.value, # can be None if empty
+                "color": pref_cell.fill.fgColor,
+            }
+
+            if cell_obj["color"] == color_legend_teacher_availability["not_allowed_bg_color"] or cell_obj["color"] == color_legend_teacher_availability["allowed_bg_color"]:
+                if has_known_color is not None:
+                    if cell_obj["color"] != has_known_color:
+                        print(f"warning: teacher {teacher_obj['key']} has both allowed and not allowed color")
+
+                if cell_obj["color"] == color_legend_teacher_availability["not_allowed_bg_color"]:
+                    has_known_color = cell_obj["color"]
+                if cell_obj["color"] == color_legend_teacher_availability["allowed_bg_color"]:
+                    has_known_color = cell_obj["color"]
+
+            day_slots.append(cell_obj)
         preferences_cells.append(day_slots)
 
     pass
@@ -263,9 +305,11 @@ def extract_subject_mapping_from_sheet(ws_dozenten, all_teachers_dict):
 
 
 # TODO rework
-def extract_teachers_preferences_from_sheet(wb_prefs, all_teachers_dict):
+def extract_teachers_preferences_from_sheet(wb_prefs, all_teachers_dict, color_legend_teacher_availability):
     dozenten_worksheet = wb_prefs["Dozenten"]
-    mapping = extract_subject_mapping_from_sheet(dozenten_worksheet, all_teachers_dict)
+
+    # not needed anymore, we now use extract_subject_key_to_subject_mapping_from_sheet
+    # mapping = extract_subject_mapping_from_sheet(dozenten_worksheet, all_teachers_dict)
 
     # each teacher has a separate sheet with it's key
     # tuple of worksheet and teacher key
@@ -279,7 +323,7 @@ def extract_teachers_preferences_from_sheet(wb_prefs, all_teachers_dict):
 
     for sheet, teacher_key in relevant_work_sheets:
         teacher_obj = all_teachers_dict[teacher_key]
-        extract_single_teacher_preferences_from_sheet(sheet, teacher_obj)
+        extract_single_teacher_preferences_from_sheet(sheet, teacher_obj, color_legend_teacher_availability)
 
     return None
 
@@ -359,7 +403,8 @@ def main():
     wb_teachers_preferences = openpyxl.load_workbook('example/07_KW 45_03.11.-07.11.2025_IN.xlsm',
                                                      read_only=False, data_only=True)
 
-    # extract_teachers_preferences_from_sheet(wb_teachers_preferences, all_teachers_dict)
+    color_legend_teacher_availability = extract_teacher_available_color_mapping(wb_teachers_preferences)
+    extract_teachers_preferences_from_sheet(wb_teachers_preferences, all_teachers_dict, color_legend_teacher_availability)
     extract_subject_key_to_subject_mapping_from_sheet(wb_teachers_preferences, None)
 
     print("finished")

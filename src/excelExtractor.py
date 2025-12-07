@@ -250,7 +250,7 @@ def extract_subject_mapping_from_sheet(ws_dozenten, all_teachers_dict):
                 subject, teacher = value.split("(")
                 teacher_key = teacher.strip(")")
 
-                if teacher_key is "":
+                if teacher_key == "":
                     print(f"warning: teacher key is empty for subject {subject} for class {class_name}")
                     continue
                 if teacher_key not in all_teachers_dict:
@@ -262,9 +262,10 @@ def extract_subject_mapping_from_sheet(ws_dozenten, all_teachers_dict):
     return subject_teacher_pair_by_class_name_dict
 
 
+# TODO rework
 def extract_teachers_preferences_from_sheet(wb_prefs, all_teachers_dict):
-    dozentne_worksheet = wb_prefs["Dozenten"]
-    mapping = extract_subject_mapping_from_sheet(dozentne_worksheet, all_teachers_dict)
+    dozenten_worksheet = wb_prefs["Dozenten"]
+    mapping = extract_subject_mapping_from_sheet(dozenten_worksheet, all_teachers_dict)
 
     # each teacher has a separate sheet with it's key
     # tuple of worksheet and teacher key
@@ -281,6 +282,30 @@ def extract_teachers_preferences_from_sheet(wb_prefs, all_teachers_dict):
         extract_single_teacher_preferences_from_sheet(sheet, teacher_obj)
 
     return None
+
+
+def extract_subject_key_to_subject_mapping_from_sheet(wb_prefs, all_subjects_dict):
+    mapping_worksheet = wb_prefs["FächerMap"]
+
+    subject_name_to_short_dict = {}
+
+    # subject short | subject name
+    start_col = 1
+    start_row = 2
+    max_row = 1000  # until we find empty row, but to be safe here
+
+    for row_j in range(start_row, max_row):
+        subject_short_cell = mapping_worksheet.cell(row=row_j, column=start_col)
+        subject_name_cell = mapping_worksheet.cell(row=row_j, column=start_col + 1)
+
+        if subject_short_cell.value is None:
+            break
+
+        subject_short = subject_short_cell.value
+        subject_name = subject_name_cell.value
+        subject_name_to_short_dict[subject_short] = subject_name
+
+    return subject_name_to_short_dict
 
 
 def main():
@@ -334,7 +359,8 @@ def main():
     wb_teachers_preferences = openpyxl.load_workbook('example/07_KW 45_03.11.-07.11.2025_IN.xlsm',
                                                      read_only=False, data_only=True)
 
-    extract_teachers_preferences_from_sheet(wb_teachers_preferences, all_teachers_dict)
+    # extract_teachers_preferences_from_sheet(wb_teachers_preferences, all_teachers_dict)
+    extract_subject_key_to_subject_mapping_from_sheet(wb_teachers_preferences, None)
 
     print("finished")
 

@@ -69,7 +69,10 @@ def extract_classes_with_data_from_sheet(ws):
                 # one row
                 class_data_3 = ws.cell(row=range_class_data_2[1] + 1, column=range_class_data_2[0])
                 range_class_data_3 = get_cell_range_from_merged_cells(ws, class_data_3)
-                class_name_lines.append(class_data_3.value)
+                if class_data_3.value is None:
+                    class_name_lines.append("")
+                else:
+                    class_name_lines.append(class_data_3.value)
 
             else:
                 # data is a merged cell with more than one row -> there is no data 3
@@ -83,7 +86,10 @@ def extract_classes_with_data_from_sheet(ws):
                 # data 1 is 2 rows high, so we can have data 3
                 class_data_3 = ws.cell(row=range_class_name[1] + 1, column=range_class_name[0])
                 range_class_data_3 = get_cell_range_from_merged_cells(ws, class_data_3)
-                class_name_lines.append(class_data_3.value)
+                if class_data_3.value is None:
+                    class_name_lines.append("")
+                else:
+                    class_name_lines.append(class_data_3.value)
 
         class_obj = {
             "name": str.join("\n", class_name_lines),
@@ -188,6 +194,7 @@ def extract_all_data_from_sheet(ws):
     return {
         "all_teachers_list": all_teachers_list,
         "all_teachers_dict": all_teachers_dict,
+        "all_classes": all_classes,
     }
 
 
@@ -213,6 +220,7 @@ def extract_teacher_available_color_mapping(wb_prefs):
         "allowed_bg_color": allowed_color,
         "not_allowed_bg_color": mapping_not_allowed_color
     }
+
 
 def extract_single_teacher_preferences_from_sheet(ws, teacher_obj, color_legend_teacher_availability):
     start_col = 3  # C, here is also the name of the class and time slots
@@ -240,11 +248,12 @@ def extract_single_teacher_preferences_from_sheet(ws, teacher_obj, color_legend_
 
             cell_obj = {
                 "slot_index": pref_cell.row - (start_row + 1),
-                "class_name": pref_cell.value, # can be None if empty
+                "class_name": pref_cell.value,  # can be None if empty
                 "color": pref_cell.fill.fgColor,
             }
 
-            if cell_obj["color"] == color_legend_teacher_availability["not_allowed_bg_color"] or cell_obj["color"] == color_legend_teacher_availability["allowed_bg_color"]:
+            if cell_obj["color"] == color_legend_teacher_availability["not_allowed_bg_color"] or cell_obj["color"] == \
+                    color_legend_teacher_availability["allowed_bg_color"]:
                 if has_known_color is not None:
                     if cell_obj["color"] != has_known_color:
                         print(f"warning: teacher {teacher_obj['key']} has both allowed and not allowed color")
@@ -305,7 +314,7 @@ def extract_subject_mapping_from_sheet(ws_dozenten, all_teachers_dict):
 
 
 # TODO rework
-def extract_teachers_preferences_from_sheet(wb_prefs, all_teachers_dict, color_legend_teacher_availability):
+def extract_teachers_availability_and_prefs_from_sheet(wb_prefs, all_teachers_dict, color_legend_teacher_availability):
     dozenten_worksheet = wb_prefs["Dozenten"]
 
     # not needed anymore, we now use extract_subject_key_to_subject_mapping_from_sheet
@@ -328,6 +337,7 @@ def extract_teachers_preferences_from_sheet(wb_prefs, all_teachers_dict, color_l
     return None
 
 
+# TODO
 def extract_subject_key_to_subject_mapping_from_sheet(wb_prefs, all_subjects_dict):
     mapping_worksheet = wb_prefs["FächerMap"]
 
@@ -352,40 +362,218 @@ def extract_subject_key_to_subject_mapping_from_sheet(wb_prefs, all_subjects_dic
     return subject_name_to_short_dict
 
 
+def extract_class_mapping_from_sheet(wb_prefs):
+    mapping_worksheet = wb_prefs["KlassenMap"]
+    # mapping from class keys to class full names (3 columns)
+    class_key_to_full_name_dict = {}
+
+    # class key | class name part 1 | class name part 2 (optional) | class name part 3 (optional)
+    start_col = 1
+    start_row = 2
+    max_row = 100  # until we find empty row, but to be safe here
+
+    for row_j in range(start_row, max_row):
+        class_key = mapping_worksheet.cell(row=row_j, column=start_col)
+        class_name_part_1 = mapping_worksheet.cell(row=row_j, column=start_col + 1)
+        class_name_part_2 = mapping_worksheet.cell(row=row_j, column=start_col + 2)
+        class_name_part_3 = mapping_worksheet.cell(row=row_j, column=start_col + 3)
+
+        if class_key.value is None:
+            continue
+
+        name_full = ""
+
+        if class_name_part_1.value is not None:
+            name_full += class_name_part_1.value
+        else:
+            raise Exception(f"class name part 1 is required in worksheet KlassenMap for class key '{class_key.value}'")
+
+        if class_name_part_2.value is not None:
+            name_full += f" {class_name_part_2.value}"
+
+        if class_name_part_3.value is not None:
+            name_full += f" {class_name_part_3.value}"
+
+        class_key_to_full_name_dict[class_key.value] = {
+            "name_part_1": class_name_part_1.value,
+            "name_part_2": class_name_part_2.value,
+            "name_part_3": class_name_part_3.value,
+            "name_full": name_full
+        }
+
+    return class_key_to_full_name_dict
+
+
+def add_class_key_to_all_classes(all_classes, class_key_to_full_name_dict):
+
+    classes_to_remove = []
+
+    for class_obj in all_classes:
+        class_name_fields = class_obj["name_fields"]
+
+        class_name_fields_not_empty = [x for x in class_name_fields if x is not None and x != ""]
+        class_name_full = str.join(" ", class_name_fields_not_empty)
+
+        for class_key, class_name_infos in class_key_to_full_name_dict.items():
+            if class_name_infos['name_full'] == class_name_full:
+                class_obj["key"] = class_key
+                print(f"class '{class_name_full}' has key '{class_key}'")
+                break
+        if "key" not in class_obj:
+            print(f"warning: class '{class_name_full}' has no key in sheet 'KlassenMap' but has data in hours data excel table, DISCARDING!")
+            classes_to_remove.append(class_obj)
+
+    for class_obj in classes_to_remove:
+        all_classes.remove(class_obj)
+
+
+
+# see extract_single_teacher_preferences_from_sheet
+def extract_current_single_plan_from_sheet(ws_plan, curr_row, curr_col, class_name):
+    curr_class_name_cell = ws_plan.cell(row=curr_row, column=curr_col)
+
+    slots_per_day = 8
+
+    dates = []
+    # Mo till Fr (the dates)
+    for col in range(curr_col + 1, curr_col + 5):
+        date_cell = ws_plan.cell(row=curr_row + 1, column=col)
+        dates.append(date_cell.value)
+
+    table = []
+
+    for col in range(curr_col + 1, curr_col + 5):
+        day_slots = []
+        for row in range(curr_row + 2, curr_row + slots_per_day + 2):
+            cell = ws_plan.cell(row=row, column=col)
+            day_slots.append(cell.value)
+
+        table.append(day_slots)
+
+    return dates, table
+
+
+# extract the current state of the plan from the sheet
+# the task is to fill out ONLY the missing fields
+def extract_current_plan_from_sheet(wb_prefs):
+    ws_plan = wb_prefs["Plan"]
+
+    start_col = 2
+    start_row = 10
+    max_row = 1000
+
+    # key is the class name
+    current_plan_dict = {}
+
+    col_increment = 8
+    row_increment = 13
+
+    curr_row = start_row
+    curr_col = start_col
+
+    all_table_data_dict = {}
+
+    # we check vertically and then horizontally, then again vertically, ...
+    is_finished_vertically = False
+    is_finished_horizontally = False
+
+    while is_finished_vertically == False:
+        is_finished_horizontally = False
+
+        while is_finished_horizontally == False:
+            curr_class_name_cell = ws_plan.cell(row=curr_row, column=curr_col)
+            class_key = curr_class_name_cell.value
+
+            # TODO sometimes we have invalid class names -> check against dict if we know this class!!
+            # e.g. Reserve1, ReserveX, ...
+
+            if class_key is None:
+                is_finished_horizontally = True
+                break
+            else:
+                # extract single
+                table_data = extract_current_single_plan_from_sheet(ws_plan, curr_row, curr_col, class_key)
+                table_dates = table_data[0]
+                table_column_data = table_data[1]
+
+                all_table_data_dict[class_key] = [table_dates, table_column_data]
+
+            curr_col += col_increment
+
+        curr_col = start_col
+        curr_row += row_increment
+        curr_class_name_cell = ws_plan.cell(row=curr_row, column=curr_col)
+
+        if curr_class_name_cell.value is None:
+            is_finished_vertically = True
+            break
+
+    return all_table_data_dict
+
+
+def _get_class_keys_to_all_classes_index_mapping(all_table_data_dict, all_classes):
+    # all_table_data_dict[class_key] = [table_dates, table_column_data]
+
+    used_class_keys = []
+
+    for class_obj in all_classes:
+        class_key = class_obj["key"]
+        if class_key not in all_table_data_dict:
+            print(f"warning: class key '{class_key}' not found in table data (Plan) but has data in hours data excel table")
+            continue
+        used_class_keys.append(class_key)
+        class_obj["table_dates"] = all_table_data_dict[class_key]
+
+    all_table_data_class_keys = list(all_table_data_dict.keys())
+
+    difference_class_keys = list(set(all_table_data_class_keys) - set(used_class_keys))
+
+    for class_key in difference_class_keys:
+        print(f"warning: class key '{class_key}' has table data (Plan) but was not found in all classes (hours data excel table)")
+
+    pass
+
+
 def main():
     wb = openpyxl.load_workbook('example/SJ 25-26_Gesamtübersicht Einsatz Lehrkräfte EA Halle 2025-05-21_3.xlsx',
                                 read_only=False)
     worksheet_blacklist = ["variablen", "kumuliert"]
     all_relevant_work_sheets = []
 
-    # for sheet in wb:
-    #     worksheet_name = sheet.title.lower()
-    #     is_relevant = True
-    #     for blacklisted_name in worksheet_blacklist:
-    #         if blacklisted_name in worksheet_name:
-    #             is_relevant = False
-    #             break
-    #
-    #     if not is_relevant:
-    #         continue
-    #     all_relevant_work_sheets.append(sheet)
-    #     print(sheet.title)
+    for sheet in wb:
+        worksheet_name = sheet.title.lower()
+        is_relevant = True
+        for blacklisted_name in worksheet_blacklist:
+            if blacklisted_name in worksheet_name:
+                is_relevant = False
+                break
+
+        if not is_relevant:
+            continue
+        all_relevant_work_sheets.append(sheet)
+        print(sheet.title)
 
     all_teachers_list = []
     all_teachers_dict = {}
-    #
-    #
-    # # ws = wb['KP 25_26']
-    # for ws in all_relevant_work_sheets:
-    #     data = extract_all_data_from_sheet(ws)
-    #     for teacher_obj in data["all_teachers_list"]:
-    #         teacher_key = teacher_obj["key"]
-    #         if teacher_key not in all_teachers_dict:
-    #             all_teachers_dict[teacher_key] = teacher_obj
-    #             all_teachers_list.append(teacher_obj)
-    #         else:
-    #             pass
-    #     break
+    all_classes = []
+
+    # ws = wb['KP 25_26']
+    for ws in all_relevant_work_sheets:
+        data = extract_all_data_from_sheet(ws)
+        for teacher_obj in data["all_teachers_list"]:
+            teacher_key = teacher_obj["key"]
+            if teacher_key not in all_teachers_dict:
+                all_teachers_dict[teacher_key] = teacher_obj
+                all_teachers_list.append(teacher_obj)
+            else:
+                pass
+
+        for _class in data["all_classes"]:
+            all_classes.append(_class)
+
+        # break
+    print(f"found {len(all_teachers_list)} teachers")
+    print(f"found {len(all_classes)} classes")
     #
     # # write to json file
     # teacher_data_json = json.dumps(all_teachers_list, indent=4)
@@ -393,19 +581,29 @@ def main():
     #     outfile.write(teacher_data_json)
 
     # read from json file
-    with open('example/all_teachers.json', 'r') as infile:
-        all_teachers_list = json.load(infile)
-
-        for teacher_obj in all_teachers_list:
-            teacher_key = teacher_obj["key"]
-            all_teachers_dict[teacher_key] = teacher_obj
+    # with open('example/all_teachers.json', 'r') as infile:
+    #     all_teachers_list = json.load(infile)
+    #
+    #     for teacher_obj in all_teachers_list:
+    #         teacher_key = teacher_obj["key"]
+    #         all_teachers_dict[teacher_key] = teacher_obj
 
     wb_teachers_preferences = openpyxl.load_workbook('example/07_KW 45_03.11.-07.11.2025_IN.xlsm',
                                                      read_only=False, data_only=True)
 
     color_legend_teacher_availability = extract_teacher_available_color_mapping(wb_teachers_preferences)
-    extract_teachers_preferences_from_sheet(wb_teachers_preferences, all_teachers_dict, color_legend_teacher_availability)
+
+    extract_teachers_availability_and_prefs_from_sheet(wb_teachers_preferences, all_teachers_dict,
+                                                       color_legend_teacher_availability)
+
+    class_key_to_full_name_dict = extract_class_mapping_from_sheet(wb_teachers_preferences)
+    add_class_key_to_all_classes(all_classes, class_key_to_full_name_dict)
+
     extract_subject_key_to_subject_mapping_from_sheet(wb_teachers_preferences, None)
+
+    all_table_data_dict = extract_current_plan_from_sheet(wb_teachers_preferences)
+
+    _get_class_keys_to_all_classes_index_mapping(all_table_data_dict, all_classes)
 
     print("finished")
 

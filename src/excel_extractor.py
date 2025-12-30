@@ -96,9 +96,12 @@ class ExcelExtractor:
         all_table_data_dict = extract_current_plan_from_sheet(wb_plan_preferences,
                                                               self.color_legend_teacher_availability)
 
-        _get_class_keys_to_all_classes_index_mapping(all_table_data_dict, self.all_classes)
 
-        _validate_class_teachers(self.all_classes, self.all_teachers_list, self.all_teachers_dict)
+        # this also removes empty classes (no subjects)
+        _validate_class_and_teachers(self.all_classes, self.all_teachers_list, self.all_teachers_dict)
+
+
+        _get_class_keys_to_all_classes_index_mapping(all_table_data_dict, self.all_classes)
 
         # we are only allowed to write to "PLAN" sheet
         print("finished")
@@ -382,7 +385,7 @@ def extract_and_set_single_teacher_availability_preferences_from_sheet(ws, teach
 
             cell_obj = {
                 "slot_index": pref_cell.row - (start_row + 1),
-                "class_name": pref_cell.value,  # can be None if empty
+                "class_key": pref_cell.value,  # can be None if empty
                 "color": get_cell_color(pref_cell),
                 "allowed": None # will be set later (black/white list)
             }
@@ -490,13 +493,28 @@ def _teacher_sanity_checks(all_teachers_dict, all_teachers_list, all_classes):
     # check every valid teacher has availability preferences
     for teacher_obj in all_teachers_list:
         key = teacher_obj["key"]
-        teacher_full_name = f"{teacher_obj['first_name']} {teacher_obj['last_name']}"
         availability_preference_table = teacher_obj['availability_preference_table']
 
         if availability_preference_table is None:
-            print(f"warning: teacher '{key}' [{teacher_full_name}] [{teacher_obj['contract_form']}] has no availability preferences -> teacher will not be used!")
+            print(f"warning: teacher '{key}' [{teacher_obj['teacher_full_name']}] [{teacher_obj['contract_form']}] has no availability preferences -> teacher will not be used!")
             teachers_to_ignore.append(teacher_obj)
             continue
+
+        # check if teacher perf classes are known classes
+        for day_index, availability_preference_list in enumerate(availability_preference_table):
+            for slot_index, slot_obj in enumerate(availability_preference_list):
+                prefilled_class = slot_obj['class_key']
+                if prefilled_class is not None:
+                    is_known_class = False
+                    for class_obj in all_classes:
+                        if prefilled_class == class_obj['key']:
+                            is_known_class = True
+                            break
+
+                    if not is_known_class:
+                        print(f"warning: teacher '{key}' [{teacher_obj['teacher_full_name']}] has pref for unknown class '{prefilled_class}' on day index '{day_index}' slot '{slot_index}' -> slot will be set to skip/not allowed and class removed because invalid")
+                        slot_obj['allowed'] = False
+                        slot_obj['class_key'] = None
 
 
     for teacher_obj in teachers_to_ignore:
@@ -524,7 +542,6 @@ def _teacher_sanity_checks(all_teachers_dict, all_teachers_list, all_classes):
                     print(msg)
                     # raise Exception(msg)
                     error_count += 1
-
 
     if error_count > 0:
         print(f"TODO {error_count} errors in teacher availability preferences")
@@ -554,7 +571,7 @@ def make_teacher_availability_and_prefs_canonical(all_teachers_list, color_legen
             # set allowed
             for day_slots_list in availability_preference_table:
                 for slot_obj in day_slots_list:
-                    prefilled_class = slot_obj["class_name"]
+                    prefilled_class = slot_obj["class_key"]
                     if prefilled_class is not None:
                         slot_obj["allowed"] = False # already filled -> don't change
                         continue
@@ -569,7 +586,7 @@ def make_teacher_availability_and_prefs_canonical(all_teachers_list, color_legen
             # if something is prefilled -> don't change -> not allowed
             for day_slots_list in availability_preference_table:
                 for slot_obj in day_slots_list:
-                    prefilled_class = slot_obj["class_name"]
+                    prefilled_class = slot_obj["class_key"]
                     if prefilled_class is not None:
                         slot_obj["allowed"] = False  # already filled -> don't change
                         continue
@@ -772,7 +789,7 @@ def _get_class_keys_to_all_classes_index_mapping(all_table_data_dict, all_classe
         class_key = class_obj["key"]
         if class_key not in all_table_data_dict:
             print(
-                f"warning: class key '{class_key}' not found in table data (Plan) but has data in hours data excel table")
+                f"warning: class key '{class_key}' was not found in table data (Plan) but has data in hours data excel table with subjects")
             continue
         used_class_keys.append(class_key)
         class_obj['table_dates'] = all_table_data_dict[class_key]
@@ -783,12 +800,12 @@ def _get_class_keys_to_all_classes_index_mapping(all_table_data_dict, all_classe
 
     for class_key in difference_class_keys:
         print(
-            f"warning: class key '{class_key}' has table data (Plan) but was not found in all classes (hours data excel table)")
+            f"warning: class key '{class_key}' has table data (Plan) but was not found in all classes (hours data excel table with subjects) -> ignoring")
 
     pass
 
 
-def _validate_class_teachers(all_classes, all_teachers_list, all_teachers_dict):
+def _validate_class_and_teachers(all_classes, all_teachers_list, all_teachers_dict):
     print("--- validating class teachers...")
 
     error_count = 0

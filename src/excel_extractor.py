@@ -1,5 +1,4 @@
 # https://openpyxl.readthedocs.io/en/stable/tutorial.html
-import json
 
 import openpyxl
 
@@ -19,13 +18,14 @@ class ExcelExtractor:
         self.all_teachers_list = None
         self.all_teachers_dict = None
         self.all_classes = None
+        self.subject_name_to_key_dict = None
 
     def read_all(self):
-        wb = openpyxl.load_workbook(self.excel_file_all_classes_path, read_only=False)
+        wb_overview_classes = openpyxl.load_workbook(self.excel_file_all_classes_path, read_only=False)
         worksheet_blacklist = ["variablen", "kumuliert"]
         all_relevant_work_sheets = []
 
-        for sheet in wb:
+        for sheet in wb_overview_classes:
             worksheet_name = sheet.title.lower()
             is_relevant = True
             for blacklisted_name in worksheet_blacklist:
@@ -41,6 +41,7 @@ class ExcelExtractor:
         self.all_teachers_list = []
         self.all_teachers_dict = {}
         self.all_classes = []
+        self.subject_name_to_key_dict = {}
 
         # ws = wb['KP 25_26']
         for ws in all_relevant_work_sheets:
@@ -53,8 +54,10 @@ class ExcelExtractor:
                 else:
                     pass
 
-            for _class in data["all_classes"]:
-                self.all_classes.append(_class)
+            for class_obj in data["all_classes"]:
+                self.all_classes.append(class_obj)
+                for subject_obj in class_obj["subjects"]:
+                    self.subject_name_to_key_dict[subject_obj["name"]] = None
 
             # break
         print(f"found {len(self.all_teachers_list)} teachers")
@@ -81,6 +84,8 @@ class ExcelExtractor:
         class_key_to_full_name_dict = extract_class_mapping_from_sheet(wb_plan_preferences)
         add_class_key_to_all_classes(self.all_classes, class_key_to_full_name_dict)
 
+        extract_subject_key_to_subject_mapping_from_sheet(wb_plan_preferences, self.subject_name_to_key_dict)
+
         # this is only for reading, no writing!
         extract_teachers_availability_and_prefs_from_sheet(wb_plan_preferences, self.all_teachers_dict,
                                                            self.color_legend_teacher_availability)
@@ -89,9 +94,6 @@ class ExcelExtractor:
 
         make_teacher_availability_and_prefs_canonical(self.all_teachers_list, self.color_legend_teacher_availability)
 
-
-
-        extract_subject_key_to_subject_mapping_from_sheet(wb_plan_preferences, None)
 
         all_table_data_dict = extract_current_plan_from_sheet(wb_plan_preferences,
                                                               self.color_legend_teacher_availability)
@@ -103,8 +105,10 @@ class ExcelExtractor:
 
         _get_class_keys_to_all_classes_index_mapping(all_table_data_dict, self.all_classes)
 
+        wb_overview_classes.close()
+        wb_plan_preferences.close()
         # we are only allowed to write to "PLAN" sheet
-        print("finished")
+        print("finished reading excel files")
 
     def get_max_slots_per_day(self):
         first_teacher = self.all_teachers_list[0]
@@ -113,6 +117,57 @@ class ExcelExtractor:
 
     def get_max_days(self):
         return len(self.all_teachers_list[0]['availability_preference_table'])
+
+    def write_timetable_solution_to_excel_impl(self, output_file_path, timetable_solution_tuples_for_classes_with_at_least_one_lesson):
+
+        source_file = self.excel_file_plan_availability_path
+
+        # if the output_file_path ends with .xlsm, force it to be .xlsx
+        if output_file_path.endswith(".xlsm"):
+            output_file_path = output_file_path[:-4] + ".xlsx"
+
+        # create copy of file
+        # shutil.copyfile(source_file, output_file_path)
+
+        wb_plan_output = openpyxl.load_workbook(source_file, read_only=False)
+
+        ws_plan_out = wb_plan_output['Plan']
+
+        for timetable_solutions_tuple in timetable_solution_tuples_for_classes_with_at_least_one_lesson:
+            class_obj = timetable_solutions_tuple[0]
+            print(f"writing timetable solution for class '{class_obj['key']}' ('{class_obj['name_single_line']}')")
+            timetable_solution_dict = timetable_solutions_tuple[1]
+            table_start_coord_tuple = timetable_solutions_tuple[2]
+
+            # top left cell of class timetable
+            class_key_row_in_plan = table_start_coord_tuple['start_row']
+            class_key_col_in_plan = table_start_coord_tuple['start_col']
+
+            num_days = len(timetable_solution_dict)
+
+            for day_index in range(num_days):
+                timetable_solution_slot_list = timetable_solution_dict[day_index]
+                for slot_index, timetable_solution_entry in enumerate(timetable_solution_slot_list):
+                    if timetable_solution_entry is None:
+                        continue
+                    # row + 1 are the dates
+                    plan_cell = ws_plan_out.cell(column=class_key_col_in_plan + 1 + day_index, row=class_key_row_in_plan + 2 + slot_index)
+                    teacher_key = timetable_solution_entry['teacher_key']
+                    subject_key = timetable_solution_entry['subject_key']
+                    class_key = timetable_solution_entry['class_key']
+                    solution_value = None
+
+                    if subject_key in self.subject_name_to_key_dict:
+                        solution_value = f"{self.subject_name_to_key_dict[subject_key]}({teacher_key})"
+                    else:
+                        solution_value = f"{subject_key}({teacher_key})"
+                        print(f"warning: subject key '{subject_key}' not found in subject name to key dict -> using as is")
+
+                    plan_cell.value = solution_value
+
+        wb_plan_output.save(output_file_path)
+        # wb_plan_output.close()
+
 
 def get_excel_rect_data_as_array(ws, min_row, max_row, min_col, max_col):
     array = []
@@ -409,7 +464,7 @@ def extract_and_set_single_teacher_availability_preferences_from_sheet(ws, teach
 
     return True
 
-
+# obsolete
 def extract_subject_mapping_from_sheet(ws_dozenten, all_teachers_dict):
     start_col = 1
     max_col = 100
@@ -598,15 +653,15 @@ def make_teacher_availability_and_prefs_canonical(all_teachers_list, color_legen
 
 
 # TODO
-def extract_subject_key_to_subject_mapping_from_sheet(wb_prefs, all_subjects_dict):
+def extract_subject_key_to_subject_mapping_from_sheet(wb_prefs, subject_name_to_key_dict):
     mapping_worksheet = wb_prefs["FächerMap"]
-
-    subject_name_to_short_dict = {}
 
     # subject short | subject name
     start_col = 1
     start_row = 2
     max_row = 1000  # until we find empty row, but to be safe here
+    error_count = 0
+    found_subject_names = []
 
     for row_j in range(start_row, max_row):
         subject_short_cell = mapping_worksheet.cell(row=row_j, column=start_col)
@@ -617,9 +672,25 @@ def extract_subject_key_to_subject_mapping_from_sheet(wb_prefs, all_subjects_dic
 
         subject_short = subject_short_cell.value
         subject_name = subject_name_cell.value
-        subject_name_to_short_dict[subject_short] = subject_name
 
-    return subject_name_to_short_dict
+        if subject_name not in subject_name_to_key_dict:
+            print(f"warning: subject '{subject_name}' from mapping sheet 'FächerMap' has not real subject -> ignoring")
+            continue
+
+        found_subject_names.append(subject_name)
+        subject_name_to_key_dict[subject_name] = subject_short
+
+    # not check if all know subjects have a short form
+    known_subjects = list(subject_name_to_key_dict.keys())
+    for subject_name in known_subjects:
+        subject_short_form = subject_name_to_key_dict[subject_name]
+
+        if subject_short_form is None:
+            print(f"error: subject '{subject_name}' has no short form in sheet 'FächerMap'")
+            error_count += 1
+
+    if error_count > 0:
+        raise Exception(f" {error_count} errors in subject mapping")
 
 
 def extract_class_mapping_from_sheet(wb_prefs):
@@ -764,8 +835,14 @@ def extract_current_plan_from_sheet(wb_prefs, color_legend_teacher_availability)
                                                                     color_legend_teacher_availability)
                 table_dates = table_data[0]
                 table_column_data = table_data[1]
+                # here is the class name
+                table_start_row = curr_row
+                table_start_col = curr_col
 
-                all_table_data_dict[class_key] = [table_dates, table_column_data]
+                all_table_data_dict[class_key] = [table_dates, table_column_data, {
+                    "start_row": table_start_row,
+                    "start_col": table_start_col
+                }]
 
             curr_col += col_increment
 

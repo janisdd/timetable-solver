@@ -17,6 +17,7 @@ class StundenplanHelper:
     all_var_names = None
     max_days = -1
     max_slots_per_day = -1
+    all_class_timetables_tuples = None
 
     def __init__(self, excel_extractor):
         self.excel_extractor = excel_extractor
@@ -226,8 +227,6 @@ class StundenplanHelper:
             if v.varValue == 1:
                 print(v.name, "=", v.varValue)
 
-        print("finished")
-
         for slack_var in all_slack_vars_for_class_lesson_requirements:
             if slack_var.varValue > 0:
                 teacher_Key = get_slack_var_parts__teacher_offered_lessons_total(slack_var.name)
@@ -236,8 +235,13 @@ class StundenplanHelper:
                 print(
                     f"Lehrer {teacher_Key} hat {int(slack_var.varValue)}x zu wenig Unterricht (hat {int(required_slots) - int(slack_var.varValue)}/{int(required_slots)})")
 
+        print("finished")
+        self.all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
 
-        get_stundenplan_from_vars(self)
+    # clone the file with PLAN
+    def write_timetable_solution_to_excel(self, output_file_path):
+        print(f"writing timetable solution to excel file: {output_file_path}")
+        self.excel_extractor.write_timetable_solution_to_excel_impl(output_file_path, self.all_class_timetables_tuples)
 
 def get_slack_var_parts__teacher_offered_lessons_total(var_name):
     var_parts = var_name.split("_")
@@ -380,10 +384,11 @@ def print_timetable(class_obj, stundenplan, stundenplanHelper, at_least_one_less
         print("Keine Lehrveranstaltungen gefunden.")
     print()
 
-def get_stundenplan_from_vars(stundenplanHelper):
+def get_stundenplan_tuples_from_vars(stundenplanHelper):
     # we need a timetable for each teacher
     # we need a timetable for each class
 
+    all_class_timetables = []
     solution_variables_obj = []
 
     for var_name, var in stundenplanHelper.all_vars.items():
@@ -398,6 +403,8 @@ def get_stundenplan_from_vars(stundenplanHelper):
     for class_obj in stundenplanHelper.excel_extractor.all_classes:
         at_least_one_lesson = False
         class_key = class_obj['key']
+        table_start_coord_tuple = class_obj['table_dates'][2]
+
         class_timetable = create_empty_timetable(stundenplanHelper.max_days, stundenplanHelper.max_slots_per_day)
         for day_index in range(stundenplanHelper.max_days):
             for slot_index in range(stundenplanHelper.max_slots_per_day):
@@ -409,6 +416,9 @@ def get_stundenplan_from_vars(stundenplanHelper):
                     ):
                         class_timetable[day_index][slot_index] = var_obj
                         at_least_one_lesson = True
+
+        if at_least_one_lesson:
+            all_class_timetables.append([class_obj, class_timetable, table_start_coord_tuple])
 
         print_timetable(class_obj, class_timetable, stundenplanHelper, at_least_one_lesson)
 
@@ -427,7 +437,7 @@ def get_stundenplan_from_vars(stundenplanHelper):
     #                     teacher_timetable[day_name][lesson_hour - 1] = var_obj
     #
     #     print_timetable(teacher_name, teacher_timetable)
-
+    return all_class_timetables
 
 
 # TODO output to new file
@@ -442,225 +452,4 @@ stundenplaner.init_new_timetable_problem()
 stundenplaner.setup_fixed_vars()
 stundenplaner.setup_constraints()
 stundenplaner.solve_timetable_problem()
-
-# # TODO
-# teacher_avg_lessons = 1000
-#
-# # all days can have a different number of lessons
-# # but for display purposes we need to know the max number of lessons among all days
-# maximal_lessons_per_day = -1
-# for day_name, max_lesson_hours in days.items():
-#     if max_lesson_hours > maximal_lessons_per_day:
-#         maximal_lessons_per_day = max_lesson_hours
-#
-
-######## constraints
-
-# # the sum of lessons for one teacher cannot exceed the total number of lessons among all subjects
-# not necessarily...
-# for teacher_name, teacher_info in teachers.items():
-#     offered_lessons = teacher_info["offered_lessons"]
-#     teacher_subjects = teacher_info["subjects"]
-#
-#     var_names = get_all_vars_with_preset(teacher=teacher_name)
-#     var = [all_vars[var_name] for var_name in var_names]
-#     c1 = lpSum(var) <= offered_lessons, f"the sum of lessons for one teacher cannot exceed the total number of lessons among all subjects {teacher_name}"
-#     prob += c1
-
-# internships
-# for class_name in all_internships:
-#     days_off_names = internships[class_name]
-#     for day_name in days_off_names:
-#         var_names = get_all_vars_with_preset(class_key=class_name, day_index=day_name)
-#         var = [all_vars[var_name] for var_name in var_names]
-#         prob += lpSum(var) == 0, f"internships {var_names}, {day_name}"
-
-# TODO is combined with favor monday over friday...
-# coefficient = -1000
-# fixe_teacher_subjects_for_class = LpAffineExpression(None)
-# # fixed teachers with subjects for classes
-# for class_name in fixed_teacher_subjects_for_class.keys():
-#     subject_teacher_tuple_map = fixed_teacher_subjects_for_class[class_name]
-#     for subject_name, teacher_name in subject_teacher_tuple_map.items():
-#         var_names = get_all_vars_with_preset(teacher=teacher_name, subject=subject_name, class_=class_name)
-#
-#         for var_name in var_names:
-#             var = all_vars[var_name]
-#             fixe_teacher_subjects_for_class += var * coefficient
-
-# TODO??
-# one class should always have the same subject with the same teacher
-# because we don't know which day the teacher will teach, we set all other options to 0
-# e.g. 5a should always be teaching deutsch
-# [teacher]_[subject]_montag-1_1_5a + ... = 1
-# c_count = 0
-# for class_name in fixed_teacher_subjects_for_class.keys():
-#     subject_teacher_tuple_map = fixed_teacher_subjects_for_class[class_name]
-#     for subject_name, teacher_name in subject_teacher_tuple_map.items():
-#         var_names_with_all_teachers = get_all_vars_with_preset(class_key=class_name, subject_key=subject_name)
-#         # now get all other teachers
-#         var_names_with_other_teachers = [var_name for var_name in var_names_with_all_teachers if
-#                                          teacher_name != get_var_parts_obj(var_name)["teacher"]]
-#         var = [all_vars[var_name] for var_name in var_names_with_other_teachers]
-#         c1 = lpSum(var) == 0, f"one class should always have the same subject with the same teacher {c_count}"
-#         c_count += 1
-#         prob += c1
-
-# teacher sick data (for day X for [list] lesson hours)
-# set the variables to 0
-# e.g. l1_[subject]_montag-1_1_[class] = 0´
-# c_count = 0
-# for teacher_name, sick_map in teacher_sick_data.items():
-#     for day_name, sick_lesson_hours_list in sick_map.items():
-#         for sick_lesson_hour in sick_lesson_hours_list:
-#             var_names = get_all_vars_with_preset(teacher_key=teacher_name, day_index=day_name, slot_index=sick_lesson_hour)
-#             var = [all_vars[var_name] for var_name in var_names]
-#             c1 = lpSum(var) == 0, f"teacher sick data (for day X for [list] lesson hours) {c_count}"
-#             c_count += 1
-#             prob += c1
-
-
-# teacher fixed data (teacher X want subject Y for class Z at day A in slots [list])
-# set the variables to 1
-# e.g. l1_deu_montag-1_2_5a = 1
-# c_count = 0
-# for teacher_name, fixed_map in teacher_fixed_data.items():
-#     for day_name, data in fixed_map.items():
-#         class_name = data["_class"]
-#         subject_name = data["subject"]
-#         slots_list = data["slots"]
-#         for slot in slots_list:
-#             var_names = get_all_vars_with_preset(teacher_key=teacher_name, subject_key=subject_name, day_index=day_name,
-#                                                  slot_index=slot, class_key=class_name)
-#             var = [all_vars[var_name] for var_name in var_names]
-#             c1 = lpSum(var) == 1, f"teacher fixed data (teacher X want subject Y for class Z at day A in slots [list]) {c_count}"
-#             c_count += 1
-#             prob += c1
-
-# every class should get all subjects in one year
-# because this is a slack var, we minimize it -> we try to meet this goal
-# e.g. 5a must get 4x deutsch
-# [teacher]_deu_[day]_[class hour]_5a + ... = 4
-# c_count = 0
-# all_slack_vars_for_class_lesson_requirements = []
-# for class_name in all_classes:
-#     class_with_subjects = classes[class_name]
-#
-#     for subject_name, required_lessons in class_with_subjects.items():  # e.g. deutsch
-#         var_names = get_all_vars_with_preset(class_key=class_name, subject_key=subject_name)
-#         var = [all_vars[var_name] for var_name in var_names]
-#
-#         s1 = pulp.LpVariable(f"{class_name}_{subject_name}_missing_required_lessons", lowBound=0)  # Slack variable
-#         all_slack_vars_for_class_lesson_requirements.append(s1)
-#
-#         c1 = lpSum(var) + s1 == required_lessons, f"every class must get all subjects in one year {c_count}"
-#         c_count += 1
-#         prob += c1
-
-#############################################################################################
-# every teacher should have his offered lessons
-# simple: every teacher should do his required lessons, everything too much is captured in slack var -> minimize slack
-# c_count = 0
-# all_slack_vars_for_teacher_lesson_requirements = []
-# sub_teacher_lesson_requirements = []
-#
-# for teacher_name, teacher_info in teachers.items():
-#     offered_lessons = teacher_info["offered_lessons"]
-#     teacher_subjects = teacher_info["subjects"]
-#
-#     var_names = get_all_vars_with_preset(teacher_key=teacher_name)
-#     var = [all_vars[var_name] for var_name in var_names]
-#
-#     s1 = pulp.LpVariable(f"{teacher_name}_missing_offered_lessons", lowBound=0)  # Slack variable
-#     all_slack_vars_for_teacher_lesson_requirements.append(s1)
-#
-#     # sub_teacher_lesson_requirements.append(s1 * offered_lessons)
-#     sub_teacher_lesson_requirements.append(s1)
-#
-#     c1 = lpSum(var) + s1 == offered_lessons, f"every teacher should have approx his offered lessons in total {c_count}"
-#     c_count += 1
-#     prob += c1
-
-
-# dummy target function
-# prob += 0 # no slack
-# prob += lpSum(all_slack_vars)
-
-
-# # favor first days first
-# def sort_by_lesson(var_name):
-#     parts_obj = get_var_parts_obj(var_name)
-#     return parts_obj["lesson_hour"]
-#
-#
-# # TODO this also handles "no holes" like free lessons hours in the middle?
-# all_days_list = list(all_days)
-# favor_first_days_obj_func_vars = LpAffineExpression(None)
-# # var = [all_vars[var_name] for var_name in var_names]
-# day_count = 0
-# lessons_per_day_counter = 0
-# for day_name, max_lessons in days.items():
-#
-#     # all_lessons_on_day = get_all_vars_with_preset(day=day_name)
-#     # all_lessons_on_day.sort(key=sort_by_lesson)
-#     day_count += 1
-#
-#     for lesson_hour in range(1, max_lessons + 1):
-#         vars_lesson_slot_day = get_all_vars_with_preset(day_index=day_name, slot_index=lesson_hour)
-#
-#         lessons_per_day_counter += 1
-#         for var_name in vars_lesson_slot_day:
-#             var = all_vars[var_name]
-#             favor_first_days_obj_func_vars += var * lessons_per_day_counter
-#
-#         print()
-
-# for slack_var in all_slack_vars:
-# make sure slack variables are used last by multiplying with a large number
-# prob += favor_first_days_obj_func_vars + fixe_teacher_subjects_for_class + lpSum(all_slack_vars) * len(all_var_names)
-# prob += favor_first_days_obj_func_vars + lpSum(all_slack_vars_for_class_lesson_requirements) * len(all_var_names)
-# prob += (favor_first_days_obj_func_vars +
-#          lpSum(all_slack_vars_for_class_lesson_requirements) * len(all_var_names) +
-#          lpSum(sub_teacher_lesson_requirements)
-#          )
-# prob += favor_first_days_obj_func_vars
-
-# prob.writeLP("Stundenplan2.lp")
-# prob.solve()
-#
-# # The status of the solution is printed to the screen
-# print("Status:", LpStatus[prob.status])
-#
-# if prob.status != 1:
-#     print("No solution found")
-#     exit()
-#
-# # Each of the variables is printed with it's resolved optimum value
-# for v in prob.variables():
-#     if v.varValue == 1:
-#         print(v.name, "=", v.varValue)
-#
-# print()
-# get_stundenplan_from_vars(prob.variables())
-#
-# # check slack variables
-# for slack_var in all_slack_vars_for_class_lesson_requirements:
-#     if slack_var.varValue > 0:
-#         class_name, subject_name = get_slack_var_parts__class_subject_requirements(slack_var.name)
-#         # print("WARNING: Slack variable > 0, not all constraints could be satisfied!")
-#         required_lessons = classes[class_name][subject_name]
-#         print(
-#             f"Klasse {class_name} hat {int(slack_var.varValue)}x zu wenig {subject_name} (hat {int(required_lessons) - int(slack_var.varValue)}/{int(required_lessons)})")
-#
-#
-# for slack_var in all_slack_vars_for_teacher_lesson_requirements:
-#     if slack_var.varValue > 0:
-#         teacher_name = get_slack_var_parts__teacher_offered_lessons_total(slack_var.name)
-#         offered_lessons = teachers[teacher_name]["offered_lessons"]
-#         # print("WARNING: Slack variable > 0, not all constraints could be satisfied!")
-#         print(
-#             f"Lehrer {teacher_name} hat {int(slack_var.varValue)}x zu wenig Unterricht (hat {int(offered_lessons) - int(slack_var.varValue)}/{int(offered_lessons)})")
-#
-#
-# print()
-
+stundenplaner.write_timetable_solution_to_excel('example/07_KW 45_03.11.-07.11.2025_OUT.xlsm')

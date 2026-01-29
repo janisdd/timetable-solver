@@ -124,7 +124,7 @@ class ExcelExtractor:
 
         # if the output_file_path ends with .xlsm, force it to be .xlsx
         if output_file_path.endswith(".xlsm"):
-            output_file_path = output_file_path[:-4] + ".xlsx"
+            output_file_path = output_file_path[:-5] + ".xlsx"
 
         # create copy of file
         # shutil.copyfile(source_file, output_file_path)

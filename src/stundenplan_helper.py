@@ -2,6 +2,7 @@ from pulp import *
 from tabulate import tabulate
 
 from src.excel_extractor import ExcelExtractor
+from src.excel_extractor_erfassung import ExcelExtractorStundenerfassung
 
 
 # TODO internship not needed -> set all slots to skip
@@ -19,11 +20,18 @@ class StundenplanHelper:
     max_slots_per_day = -1
     all_class_timetables_tuples = None
 
-    def __init__(self, excel_extractor):
+    def __init__(self, excel_extractor, excel_stundenerfassung):
         self.excel_extractor = excel_extractor
+        self.excel_stundenerfassung = excel_stundenerfassung
 
     def read_excel_data(self):
         self.excel_extractor.read_all()
+
+    def read_excel_stundenerfassung(self):
+        self.excel_stundenerfassung.read_all()
+
+    def prepare_excel_data(self):
+        self.excel_stundenerfassung.add_soll_data_to_class_subject_teachers(self.excel_extractor.all_classes, self.excel_extractor.all_teachers_list)
 
     def _excel_data_sanity_checks(self):
         # e.g. our vars use _ as a separator
@@ -135,13 +143,14 @@ class StundenplanHelper:
         # [teacher]_[subject]_montag-1_slot_1_5a + ... <= 4
         c_count = 0
 
+        print(f"CONSTRAINT: max slots per day: {self.max_slots_per_day}")
         for day_index in range(self.max_days):
             for class_obj in self.excel_extractor.all_classes:
                 class_key = class_obj['key']
                 var_names = get_all_vars_with_preset(self.all_var_names, day_index=day_index, class_key=class_key)
                 var = [self.all_vars[var_name] for var_name in var_names]
                 c1 = lpSum(
-                    var) <= self.max_slots_per_day, f"every day can only have a max number of slos for one class {c_count}"
+                    var) <= self.max_slots_per_day, f"every day can only have a max number of slots for one class {c_count}"
                 c_count += 1
                 self.problem += c1
 
@@ -149,6 +158,7 @@ class StundenplanHelper:
         # day 4 slots -> teacher can only teacher 4
         # l1_[subject]_montag-1_1_[class] + ... <= 4
         c_count = 0
+        print(f"CONSTRAINT: max slots per teacher per day")
         for day_index in range(self.max_days):
             for teacher_obj in self.excel_extractor.all_teachers_list:
                 teacher_key = teacher_obj["key"]
@@ -163,6 +173,7 @@ class StundenplanHelper:
         # e.g. l1 can only teach deutsch to 5a at montag-1 in slot 1 (but not to 5b in the same slot)
         # l1_[subject]_montag-1_1_[class] + ... = 1
         c_count = 0
+        print(f"CONSTRAINT: max one subject per class at one slot")
         for teacher_obj in self.excel_extractor.all_teachers_list:
             teacher_key = teacher_obj["key"]
             for day_index in range(self.max_days):
@@ -179,6 +190,7 @@ class StundenplanHelper:
         # e.g. 5a at montag-1 in slot 1 can only have l1 teaching deutsch
         # [teacher]_[subject]_montag-1_1_5a + ... = 1
         c_count = 0
+        print(f"CONSTRAINT: every class can only have one subject with one teacher at a specific slot")
         for class_obj in self.excel_extractor.all_classes:
             class_key = class_obj['key']
             for day_index in range(self.max_days):
@@ -196,18 +208,66 @@ class StundenplanHelper:
         all_slack_vars_for_class_lesson_requirements = []
 
         # TODO test all teachers should have 10 lessons / slots
-        required_slots = 10
-        for index, teacher_obj in enumerate(self.excel_extractor.all_teachers_list):
-            teacher_key = teacher_obj["key"]
+        # required_slots = 10
+        # for index, teacher_obj in enumerate(self.excel_extractor.all_teachers_list):
+        #     teacher_key = teacher_obj["key"]
+        #
+        #     s1 = pulp.LpVariable(f"{teacher_key}_missing_required_lessons", lowBound=0) # Slack variable
+        #     all_slack_vars_for_class_lesson_requirements.append(s1)
+        #
+        #     var_names = get_all_vars_with_preset(self.all_var_names, teacher_key=teacher_key)
+        #     var = [self.all_vars[var_name] for var_name in var_names]
+        #
+        #     # TODO ist akkum + slack = soll --> welches jahr???
+        #     # dazu brauchen wir alle stundenerfassungen...
+        #     # außerdem haben wir nur name vom lehrer + abkürzung D/K(Hmue) und Erz24A
+        #     # finden wir dadurch das fach?
+        #     c1 = lpSum(var) + s1 == required_slots, f"teacher should get {required_slots}, {index}"
+        #     self.problem += c1
 
-            s1 = pulp.LpVariable(f"{teacher_key}_missing_required_lessons", lowBound=0) # Slack variable
-            all_slack_vars_for_class_lesson_requirements.append(s1)
+        # optimization function
+        _opt_index = 0
+        opt_objs_dict = {}
+        for class_obj in self.excel_extractor.all_classes:
+            class_key = class_obj['key']
+            subjects_info = class_obj["subjects"]
+            for subject_info in subjects_info:
+                subject_name = subject_info["name"]
+                teachers_with_hours = subject_info["teachers_with_hours"]
+                for teachers_with_hour_tuple in teachers_with_hours:
+                    teacher_key = teachers_with_hour_tuple['teacher_key']
 
-            var_names = get_all_vars_with_preset(self.all_var_names, teacher_key=teacher_key)
-            var = [self.all_vars[var_name] for var_name in var_names]
+                    if 'ist' not in teachers_with_hour_tuple or 'soll' not in teachers_with_hour_tuple:
+                        print(f"WARNING: missing ist/soll for teacher '{teacher_key} 'in class '{class_key}' for subject '{subject_name}' -> skipping")
+                        continue
 
-            c1 = lpSum(var) + s1 == required_slots, f"teacher should get {required_slots}, {index}"
-            self.problem += c1
+                    hours_ist = teachers_with_hour_tuple['ist']
+                    hours_soll = teachers_with_hour_tuple['soll']
+
+                    opt_obj = {
+                        "class_key": class_key,
+                        "subject_name": subject_name,
+                        "teacher_key": teacher_key,
+                        "hours_ist": hours_ist,
+                        "hours_soll": hours_soll,
+                    }
+                    hours_missing = hours_soll - hours_ist
+
+                    if hours_missing < 0:
+                        print(f"[INFO] {str(hours_missing)} hours missing < 0 for teacher {teacher_key} in class {class_key} in subject '{subject_name}' -> skipping")
+                        continue
+
+                    s1 = pulp.LpVariable(f"{class_key}_{teacher_key}_{subject_name}", lowBound=0) # Slack variable
+                    all_slack_vars_for_class_lesson_requirements.append(s1)
+
+                    opt_objs_dict[s1.name] = opt_obj
+
+                    var_names = get_all_vars_with_preset(self.all_var_names, teacher_key=teacher_key, subject_key=subject_name, class_key=class_key)
+                    var = [self.all_vars[var_name] for var_name in var_names]
+
+                    c1 = lpSum(var) + s1 == hours_missing, f"{teacher_key}_{subject_name}_lessons, {_opt_index}"
+                    _opt_index += 1
+                    self.problem += c1
 
         print('solve_timetable_problem')
         # dummy
@@ -229,11 +289,21 @@ class StundenplanHelper:
 
         for slack_var in all_slack_vars_for_class_lesson_requirements:
             if slack_var.varValue > 0:
-                teacher_Key = get_slack_var_parts__teacher_offered_lessons_total(slack_var.name)
+                opt_obj = opt_objs_dict[slack_var.name]
+                class_key = opt_obj["class_key"]
+                teacher_key = opt_obj["teacher_key"]
+                subject_name = opt_obj["subject_name"]
+                hours_ist = opt_obj["hours_ist"]
+                hours_soll = opt_obj["hours_soll"]
+
+                subject_key = self.excel_extractor.subject_name_to_key_dict[subject_name]
+                hours_diff = hours_soll - hours_ist
+
+                # teacher_Key = get_slack_var_parts__teacher_offered_lessons_total(slack_var.name)
                 # offered_lessons = self.excel_extractor.all_teachers_dict[teacher_Key]["offered_lessons"]
                 # print("WARNING: Slack variable > 0, not all constraints could be satisfied!")
                 print(
-                    f"Lehrer {teacher_Key} hat {int(slack_var.varValue)}x zu wenig Unterricht (hat {int(required_slots) - int(slack_var.varValue)}/{int(required_slots)})")
+                    f"In Klasse '{class_key}' in Fach '{subject_key}' mit Lehrer {teacher_key} hatte vorher {hours_ist}/{hours_soll} Stunden, jetzt {hours_ist + hours_diff - slack_var.varValue}/{hours_soll}, verteilt: {hours_diff - slack_var.varValue}/{hours_diff}")
 
         print("finished")
         self.all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
@@ -446,8 +516,15 @@ excel_extractor = ExcelExtractor(
     'example/07_KW 45_03.11.-07.11.2025_IN.xlsm'
 )
 
-stundenplaner = StundenplanHelper(excel_extractor)
+excel_stundenerfassung = ExcelExtractorStundenerfassung(
+    ['example/Std-erfassung_Erz24A_1. und 2. Sj.xlsx'],
+    0
+)
+
+stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)
 stundenplaner.read_excel_data()
+stundenplaner.read_excel_stundenerfassung()
+stundenplaner.prepare_excel_data()
 stundenplaner.init_new_timetable_problem()
 stundenplaner.setup_fixed_vars()
 stundenplaner.setup_constraints()

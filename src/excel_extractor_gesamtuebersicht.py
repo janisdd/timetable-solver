@@ -1,9 +1,14 @@
 # https://openpyxl.readthedocs.io/en/stable/tutorial.html
+import os
 
 import logger
 import openpyxl
 
 from src.logger import Logger
+
+MAPPINGS_SHEET_COLORS = "farben"
+MAPPINGS_SHEET_CLASSES = "klassen"
+MAPPINGS_SHEET_SUBJECTS = "fächer"
 
 
 # teachers start at row 10, col B - E
@@ -15,9 +20,10 @@ from src.logger import Logger
 # dieser helper liest die datei  SJ 25-26_Gesamtübersicht Einsatz Lehrkräfte EA Halle 2025-05-21_3 aus
 # darin sind alle lehrer zu finden, alle klassen, fächer und wv stunden ein lehrere für ein fach in einer klasse unterrichtet.
 class ExcelExtractorGesamtuebersicht:
-    def __init__(self, excel_file_all_classes_path, excel_file_plan_availability_path):
+    def __init__(self, excel_file_all_classes_path, excel_file_mappings, excel_file_plan_availability_path):
         self.log_name = "ExcelExtractorGesamtuebersicht"
         self.excel_file_all_classes_path = excel_file_all_classes_path
+        self.excel_file_mappings = excel_file_mappings
         self.excel_file_plan_availability_path = excel_file_plan_availability_path
 
         self.color_legend_teacher_availability = None
@@ -51,6 +57,7 @@ class ExcelExtractorGesamtuebersicht:
         self.all_teachers_dict = {}
         self.all_classes = []
         self.subject_name_to_key_dict = {}
+        first_pass = True
 
         # ws = wb['KP 25_26']
         for ws in all_relevant_work_sheets:
@@ -59,10 +66,16 @@ class ExcelExtractorGesamtuebersicht:
             for teacher_obj in data["all_teachers_list"]:
                 teacher_key = teacher_obj["key"]
                 if teacher_key not in self.all_teachers_dict:
+                    if not first_pass:
+                        Logger.error(
+                            f"[{self.log_name}] [{ws.title}] teacher '{teacher_key}' was not in the first table! Check if this is a mistake!")
+
                     self.all_teachers_dict[teacher_key] = teacher_obj
                     self.all_teachers_list.append(teacher_obj)
                 else:
                     pass
+
+            first_pass = False
 
             for class_obj in data["all_classes"]:
                 self.all_classes.append(class_obj)
@@ -86,15 +99,24 @@ class ExcelExtractorGesamtuebersicht:
         #         teacher_key = teacher_obj["key"]
         #         all_teachers_dict[teacher_key] = teacher_obj
 
+        # check if mappings file exists
+        self._ensure_mappings_file_exists_and_required_sheets(self.excel_file_mappings, self.all_classes,
+                                                              self.subject_name_to_key_dict)
+
+        wb_mappings = openpyxl.load_workbook(self.excel_file_mappings, read_only=False, data_only=True)
+
+        self.color_legend_teacher_availability = self.extract_class_and_teacher_available_color_mapping(wb_mappings)
+
+        class_key_to_full_name_dict = self.extract_class_mapping_from_sheet(wb_mappings)
+        add_class_key_to_all_classes(self.all_classes, class_key_to_full_name_dict)
+
+        self.extract_subject_key_to_subject_mapping_from_sheet(wb_mappings, self.subject_name_to_key_dict)
+
         wb_plan_preferences = openpyxl.load_workbook(self.excel_file_plan_availability_path, read_only=False,
                                                      data_only=True)
 
-        self.color_legend_teacher_availability = extract_class_and_teacher_available_color_mapping(wb_plan_preferences)
+        # ################### bis hier ###############################
 
-        class_key_to_full_name_dict = extract_class_mapping_from_sheet(wb_plan_preferences)
-        add_class_key_to_all_classes(self.all_classes, class_key_to_full_name_dict)
-
-        extract_subject_key_to_subject_mapping_from_sheet(wb_plan_preferences, self.subject_name_to_key_dict)
 
         # this is only for reading, no writing!
         extract_teachers_availability_and_prefs_from_sheet(wb_plan_preferences, self.all_teachers_dict,
@@ -116,6 +138,247 @@ class ExcelExtractorGesamtuebersicht:
         wb_plan_preferences.close()
         # we are only allowed to write to "PLAN" sheet
         print("finished reading excel files")
+
+    def _ensure_mappings_file_exists_and_required_sheets(self, excel_file_mappings, all_classes,
+                                                         subject_name_to_key_dict):
+
+        if not os.path.exists(excel_file_mappings):
+            # then create it
+            Logger.log(f"[{self.log_name}] creating mappings file '{excel_file_mappings}'")
+            wb_mappings = openpyxl.Workbook()
+        else:
+            Logger.log(
+                f"[{self.log_name}] mappings file '{excel_file_mappings}' already exists, checking required sheets")
+            wb_mappings = openpyxl.load_workbook(excel_file_mappings, read_only=False, data_only=True)
+
+        some_changed = False
+
+        if MAPPINGS_SHEET_COLORS not in wb_mappings.sheetnames:
+            Logger.log(f"[{self.log_name}] creating color mapping sheet ('{MAPPINGS_SHEET_COLORS}') in mappings file")
+
+            # create color mapping
+            ws_color_mapping = wb_mappings.create_sheet(MAPPINGS_SHEET_COLORS)
+
+            ws_color_mapping.cell(row=2,
+                                  column=1).value = '10 (verschiedene) Farben sind für "kann nur da hin" vorgesehen, 10 für "kann da nicht hin"'
+            ws_color_mapping.cell(row=9, column=1).value = 'Farblegende Programm (genau die Farben!)'
+            ws_color_mapping.cell(row=9, column=4).value = 'Erklärung'  # D5
+            ws_color_mapping.cell(row=9, column=5).value = 'Hinweis'  # E5
+
+            default_allowed_color = "92D050"
+            default_not_allowed_color = "FF0000"
+            # set bg color to green
+            # excel uses #aarrggbb for colors, use fgColor in fill!! (bg is for patterns)
+            ws_color_mapping.cell(row=10, column=1).fill.fgColor.rgb = default_allowed_color
+            ws_color_mapping.cell(row=11, column=1).fill.fgColor.rgb = default_allowed_color
+            ws_color_mapping.cell(row=12, column=1).fill.fgColor.rgb = default_allowed_color
+            ws_color_mapping.cell(row=13, column=1).fill.fgColor.rgb = default_allowed_color
+            ws_color_mapping.cell(row=14, column=1).fill.fgColor.rgb = default_allowed_color
+            ws_color_mapping.cell(row=15, column=1).fill.fgColor.rgb = default_allowed_color
+            ws_color_mapping.cell(row=16, column=1).fill.fgColor.rgb = default_allowed_color
+            ws_color_mapping.cell(row=17, column=1).fill.fgColor.rgb = default_allowed_color
+            ws_color_mapping.cell(row=18, column=1).fill.fgColor.rgb = default_allowed_color
+            ws_color_mapping.cell(row=19, column=1).fill.fgColor.rgb = default_allowed_color
+
+            # not allowed
+            ws_color_mapping.cell(row=20, column=1).fill.fgColor.rgb = default_not_allowed_color
+            ws_color_mapping.cell(row=21, column=1).fill.fgColor.rgb = "C91BBD"
+            ws_color_mapping.cell(row=22, column=1).fill.fgColor.rgb = "F7C7AC"
+            ws_color_mapping.cell(row=23, column=1).fill.fgColor.rgb = default_not_allowed_color
+            ws_color_mapping.cell(row=24, column=1).fill.fgColor.rgb = default_not_allowed_color
+            ws_color_mapping.cell(row=25, column=1).fill.fgColor.rgb = default_not_allowed_color
+            ws_color_mapping.cell(row=26, column=1).fill.fgColor.rgb = default_not_allowed_color
+            ws_color_mapping.cell(row=27, column=1).fill.fgColor.rgb = default_not_allowed_color
+            ws_color_mapping.cell(row=28, column=1).fill.fgColor.rgb = default_not_allowed_color
+            ws_color_mapping.cell(row=29, column=1).fill.fgColor.rgb = default_not_allowed_color
+
+            some_changed = True
+        else:
+            Logger.log(
+                f"[{self.log_name}] color mapping sheet ('{MAPPINGS_SHEET_COLORS}') already exists in mappings file")
+
+        if MAPPINGS_SHEET_CLASSES not in wb_mappings.sheetnames:
+            Logger.log(f"[{self.log_name}] creating color mapping sheet ('{MAPPINGS_SHEET_CLASSES}') in mappings file")
+
+            # create class mapping (key to full name)
+            ws_class_mapping = wb_mappings.create_sheet(MAPPINGS_SHEET_CLASSES)
+
+            ws_class_mapping.cell(row=1,
+                                  column=1).value = 'Die Klassennamen Teile sind in der Gesamtübersicht zu finden (3 Zeile)'
+            ws_class_mapping.cell(row=3,
+                                  column=1).value = 'Kürzel frei lassen, damit nicht beachtet wird (Plan wird nicht ausgefüllt)'
+
+            ws_class_mapping.cell(row=9, column=1).value = 'Klassen Kürzel'
+            ws_class_mapping.cell(row=9, column=2).value = 'Klassenname 1'
+            ws_class_mapping.cell(row=9, column=3).value = 'Klassenname 2'
+            ws_class_mapping.cell(row=9, column=4).value = 'Klassenname 3'
+
+            curr_row = 10
+
+            for class_obj in all_classes:
+                class_key = class_obj['key']
+                class_name_parts = class_obj['name_fields']
+                for i, part in enumerate(class_name_parts):
+                    ws_class_mapping.cell(row=curr_row, column=1 + i).value = part
+
+                curr_row += 1
+
+            some_changed = True
+
+        else:
+            Logger.log(
+                f"[{self.log_name}] class mapping sheet ('{MAPPINGS_SHEET_CLASSES}') already exists in mappings file")
+
+        if MAPPINGS_SHEET_SUBJECTS not in wb_mappings.sheetnames:
+            Logger.log(f"[{self.log_name}] creating color mapping sheet ('{MAPPINGS_SHEET_SUBJECTS}') in mappings file")
+
+            # create subject key to subject mapping
+            ws_subjects_mapping = wb_mappings.create_sheet("fächer")
+
+            ws_subjects_mapping.cell(row=1, column=1).value = 'Der Fach Name ist der volle Name aus der Gesamtübersicht'
+
+            ws_subjects_mapping.cell(row=9, column=1).value = 'Fach Kürzel'
+            ws_subjects_mapping.cell(row=9, column=2).value = 'Fach Name'
+
+            subject_name_to_key_dict_items = list(subject_name_to_key_dict.items())
+
+            # subject_name_to_key_dict_items.sort(key=lambda x: x[1])
+
+            for i, subject_name_to_key_dict_item in enumerate(subject_name_to_key_dict_items):
+                subject_name = subject_name_to_key_dict_item[0]
+                ws_subjects_mapping.cell(row=10 + i, column=2).value = subject_name
+
+            some_changed = True
+
+        else:
+            Logger.log(
+                f"[{self.log_name}] color mapping sheet ('{MAPPINGS_SHEET_SUBJECTS}') already exists in mappings file")
+
+        if some_changed:
+            wb_mappings.save(excel_file_mappings)
+
+    def extract_subject_key_to_subject_mapping_from_sheet(self, wb_mappings, subject_name_to_key_dict):
+        mapping_worksheet = wb_mappings[MAPPINGS_SHEET_SUBJECTS]
+
+        # subject short | subject name
+        start_col = 1
+        start_row = 10
+        # max_row = 1000  # until we find empty row, but to be safe here
+        max_row = mapping_worksheet.max_row
+        error_count = 0
+        found_subject_names = []
+
+        for row_j in range(start_row, max_row):
+            subject_short_cell = mapping_worksheet.cell(row=row_j, column=start_col)
+            subject_name_cell = mapping_worksheet.cell(row=row_j, column=start_col + 1)
+
+            if subject_short_cell.value is None:
+                break
+
+            subject_short = subject_short_cell.value
+            subject_name = subject_name_cell.value
+
+            if subject_name not in subject_name_to_key_dict:
+                print(
+                    f"warning: subject '{subject_name}' from mapping sheet 'FächerMap' has not real subject -> ignoring")
+                Logger.warn(
+                    f"[{self.log_name}][mapping excel file] no class has subject '{subject_name}' in sheet '{MAPPINGS_SHEET_SUBJECTS}'")
+                continue
+
+            found_subject_names.append(subject_name)
+            subject_name_to_key_dict[subject_name] = subject_short
+
+        # not check if all know subjects have a short form
+        known_subjects = list(subject_name_to_key_dict.keys())
+        for subject_name in known_subjects:
+            subject_short_form = subject_name_to_key_dict[subject_name]
+
+            if subject_short_form is None:
+                Logger.error(
+                    f"[{self.log_name}][mapping excel file] subject '{subject_name}' has no short form in sheet '{MAPPINGS_SHEET_SUBJECTS}'")
+                error_count += 1
+
+        if error_count > 0:
+            raise Exception(f"[{self.log_name}][mapping excel file] {error_count} errors in subject mapping")
+
+    def extract_class_and_teacher_available_color_mapping(self, wb_mappings):
+        # excel uses aarrggbb for colors, use fgColor in fill!! (bg is for patterns)
+        ws_color_legend = wb_mappings[MAPPINGS_SHEET_COLORS]
+        mapping_allowed_row_start = 10
+
+        max_num_colors = 10
+
+        # in individual teachers sheets
+        allowed_colors = set()
+        # this will also be used as not process color
+        not_allowed_colors = set()
+
+        for i in range(max_num_colors):
+            mapping_allowed_cell = ws_color_legend.cell(row=mapping_allowed_row_start + i - 1, column=1)
+            allowed_color = get_cell_color(mapping_allowed_cell)
+            allowed_colors.add(allowed_color)
+
+        mapping_not_allowed_row_start = 20
+
+        # in individual teachers sheets
+        for i in range(max_num_colors):
+            mapping_allowed_cell = ws_color_legend.cell(row=mapping_not_allowed_row_start + i - 1, column=1)
+            not_allowed_color = get_cell_color(mapping_allowed_cell)
+            not_allowed_colors.add(not_allowed_color)
+
+        Logger.debug(f"[{MAPPINGS_SHEET_COLORS}] allowed colors: {allowed_colors}")
+        Logger.debug(f"[{MAPPINGS_SHEET_COLORS}] not allowed colors: {not_allowed_colors}")
+
+        return {
+            "allowed_bg_colors_set": allowed_colors,
+            "not_allowed_bg_colors_set": not_allowed_colors
+        }
+
+    def extract_class_mapping_from_sheet(self, wb_mappings):
+        mapping_worksheet = wb_mappings[MAPPINGS_SHEET_CLASSES]
+        # mapping from class keys to class full names (3 columns)
+        class_key_to_full_name_dict = {}
+
+        # class key | class name part 1 | class name part 2 (optional) | class name part 3 (optional)
+        start_col = 1
+        start_row = 10
+        # max_row = 100  # until we find empty row, but to be safe here
+        max_row = mapping_worksheet.max_row
+
+        for row_j in range(start_row, max_row):
+            class_key = mapping_worksheet.cell(row=row_j, column=start_col)
+            class_name_part_1 = mapping_worksheet.cell(row=row_j, column=start_col + 1)
+            class_name_part_2 = mapping_worksheet.cell(row=row_j, column=start_col + 2)
+            class_name_part_3 = mapping_worksheet.cell(row=row_j, column=start_col + 3)
+
+            if class_key.value is None:
+                continue
+
+            name_full = ""
+
+            if class_name_part_1.value is not None:
+                name_full += class_name_part_1.value
+            else:
+                raise Exception(
+                    f"[{self.log_name}][mappings excel file] class name part 1 is required in worksheet '{MAPPINGS_SHEET_CLASSES} for class key '{class_key.value}'")
+
+            if class_name_part_2.value is not None:
+                name_full += f" {class_name_part_2.value}"
+
+            if class_name_part_3.value is not None:
+                name_full += f" {class_name_part_3.value}"
+
+            class_key_to_full_name_dict[class_key.value] = {
+                "name_part_1": class_name_part_1.value,
+                "name_part_2": class_name_part_2.value,
+                "name_part_3": class_name_part_3.value,
+                "name_full": name_full
+            }
+
+        Logger.debug(
+            f"[{self.log_name}][mappings excel file] class mapping ({len(class_key_to_full_name_dict)}): {class_key_to_full_name_dict}")
+
+        return class_key_to_full_name_dict
 
     def get_max_slots_per_day(self):
         first_teacher = self.all_teachers_list[0]
@@ -262,10 +525,12 @@ def extract_classes_with_data_from_sheet(self, ws):
                 range_class_data_3 = get_cell_range_from_merged_cells(ws, class_data_3)
                 if class_data_3.value is None:
                     class_name_lines.append("")
-                    Logger.debug(f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' (name1 is >= 1 row heigh), name3: None")
+                    Logger.debug(
+                        f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' (name1 is >= 1 row heigh), name3: None")
                 else:
                     class_name_lines.append(class_data_3.value)
-                    Logger.debug(f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' (name1 is >= 1 row heigh), name3: {class_data_3.value}")
+                    Logger.debug(
+                        f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' (name1 is >= 1 row heigh), name3: {class_data_3.value}")
 
         class_obj = {
             "name": str.join("\n", class_name_lines),
@@ -286,7 +551,8 @@ def extract_classes_with_data_from_sheet(self, ws):
         all_classes.append(class_obj)
 
         if class_obj['name_single_line'] == 'Erzieher ':
-            Logger.warn(f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' special case because merged cell is wrong ...")
+            Logger.warn(
+                f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' special case because merged cell is wrong ...")
             # print("TODO 'Erzieher ' ...")
             curr_class = ws.cell(row=start_row, column=range_class_name[2] + 2)
         else:
@@ -344,7 +610,8 @@ def extract_and_set_teacher_hours_from_sheet(self, ws, all_classes, all_teachers
                     "teacher_full_name": teacher_obj['teacher_full_name'],
                     "hours": hours_for_teacher_cell.value
                 })
-                Logger.debug(f"[{self.log_name}] [{ws.title}] [{class_obj['name_single_line']}] teacher '{Logger.get_teacher_full(teacher_obj)}' found '{hours_for_teacher_cell.value}' hours for subject '{subject_obj['name']}' [cell: {Logger.get_cell_full_coord(hours_for_teacher_cell)}]")
+                Logger.debug(
+                    f"[{self.log_name}] [{ws.title}] [{class_obj['name_single_line']}] teacher '{Logger.get_teacher_full(teacher_obj)}' found '{hours_for_teacher_cell.value}' hours for subject '{subject_obj['name']}' [cell: {Logger.get_cell_full_coord(hours_for_teacher_cell)}]")
 
 
 def get_all_teachers_from_rect_data(teacher_datas):
@@ -380,7 +647,8 @@ def extract_all_data_from_sheet(self, ws):
     teachers = dict()
 
     teacher_row_start = 10
-    teacher_end_row = 100
+    # teacher_end_row = 100
+    teacher_end_row = ws.max_row
     teacher_start_col = 2
     teacher_end_col = 5
     Logger.debug(f"[{self.log_name}] [{ws.title}] getting data in rect: min_row, max_row, min_col, max_col: "
@@ -394,7 +662,8 @@ def extract_all_data_from_sheet(self, ws):
 
     Logger.debug(f"[{self.log_name}] [{ws.title}] extracting classes with data from sheet")
     all_classes = extract_classes_with_data_from_sheet(self, ws)
-    Logger.debug(f"[{self.log_name}] [{ws.title}] extracted {len(all_classes)} classes: {list(map(lambda x: x['name_single_line'], all_classes))}")
+    Logger.debug(
+        f"[{self.log_name}] [{ws.title}] extracted {len(all_classes)} classes: {list(map(lambda x: x['name_single_line'], all_classes))}")
 
     Logger.debug(f"[{self.log_name}] [{ws.title}] setting hours for teachers...")
     extract_and_set_teacher_hours_from_sheet(self, ws, all_classes, all_teachers_list, teacher_row_start)
@@ -409,43 +678,6 @@ def extract_all_data_from_sheet(self, ws):
 def get_cell_color(cell):
     # excel uses #aarrggbb for colors, use fgColor in fill!! (bg is for patterns)
     return cell.fill.fgColor
-
-
-def extract_class_and_teacher_available_color_mapping(wb_prefs):
-    # excel uses aarrggbb for colors, use fgColor in fill!! (bg is for patterns)
-    ws_color_legend = wb_prefs["Tabelle1"]
-    mapping_allowed_row = 23
-    mapping_allowed_col = 2
-
-    # in individual teachers sheets
-    mapping_allowed_cell = ws_color_legend.cell(row=mapping_allowed_row, column=mapping_allowed_col)
-    allowed_color = get_cell_color(mapping_allowed_cell)
-
-    mapping_not_allowed_row = 24
-    mapping_not_allowed_col = 2
-
-    # in individual teachers sheets
-    mapping_not_allowed_cell = ws_color_legend.cell(row=mapping_not_allowed_row, column=mapping_not_allowed_col)
-    mapping_not_allowed_color = get_cell_color(mapping_not_allowed_cell)
-
-    mapping_do_not_process_row = 25
-    mapping_do_not_process_col = 2
-
-    # only in "Plan" sheet
-    # this should be kept empty by us in "Plan" sheet
-    mapping_do_not_process_cell = ws_color_legend.cell(row=mapping_do_not_process_row,
-                                                       column=mapping_do_not_process_col)
-    mapping_do_not_process_color = get_cell_color(mapping_do_not_process_cell)
-
-    print(f"allowed color: {allowed_color}")
-    print(f"not allowed color: {mapping_not_allowed_color}")
-    print(f"do not process color: {mapping_do_not_process_color}")
-
-    return {
-        "allowed_bg_color": allowed_color,
-        "not_allowed_bg_color": mapping_not_allowed_color,
-        "do_not_process_bg_color": mapping_do_not_process_color
-    }
 
 
 def extract_and_set_single_teacher_availability_preferences_from_sheet(ws, teacher_obj,
@@ -685,89 +917,6 @@ def make_teacher_availability_and_prefs_canonical(all_teachers_list, color_legen
                         slot_obj["allowed"] = True  # should not be filled -> teacher not available here
                     else:
                         slot_obj["allowed"] = False
-
-
-# TODO
-def extract_subject_key_to_subject_mapping_from_sheet(wb_prefs, subject_name_to_key_dict):
-    mapping_worksheet = wb_prefs["FächerMap"]
-
-    # subject short | subject name
-    start_col = 1
-    start_row = 2
-    max_row = 1000  # until we find empty row, but to be safe here
-    error_count = 0
-    found_subject_names = []
-
-    for row_j in range(start_row, max_row):
-        subject_short_cell = mapping_worksheet.cell(row=row_j, column=start_col)
-        subject_name_cell = mapping_worksheet.cell(row=row_j, column=start_col + 1)
-
-        if subject_short_cell.value is None:
-            break
-
-        subject_short = subject_short_cell.value
-        subject_name = subject_name_cell.value
-
-        if subject_name not in subject_name_to_key_dict:
-            print(f"warning: subject '{subject_name}' from mapping sheet 'FächerMap' has not real subject -> ignoring")
-            continue
-
-        found_subject_names.append(subject_name)
-        subject_name_to_key_dict[subject_name] = subject_short
-
-    # not check if all know subjects have a short form
-    known_subjects = list(subject_name_to_key_dict.keys())
-    for subject_name in known_subjects:
-        subject_short_form = subject_name_to_key_dict[subject_name]
-
-        if subject_short_form is None:
-            print(f"error: subject '{subject_name}' has no short form in sheet 'FächerMap'")
-            error_count += 1
-
-    if error_count > 0:
-        raise Exception(f" {error_count} errors in subject mapping")
-
-
-def extract_class_mapping_from_sheet(wb_prefs):
-    mapping_worksheet = wb_prefs["KlassenMap"]
-    # mapping from class keys to class full names (3 columns)
-    class_key_to_full_name_dict = {}
-
-    # class key | class name part 1 | class name part 2 (optional) | class name part 3 (optional)
-    start_col = 1
-    start_row = 2
-    max_row = 100  # until we find empty row, but to be safe here
-
-    for row_j in range(start_row, max_row):
-        class_key = mapping_worksheet.cell(row=row_j, column=start_col)
-        class_name_part_1 = mapping_worksheet.cell(row=row_j, column=start_col + 1)
-        class_name_part_2 = mapping_worksheet.cell(row=row_j, column=start_col + 2)
-        class_name_part_3 = mapping_worksheet.cell(row=row_j, column=start_col + 3)
-
-        if class_key.value is None:
-            continue
-
-        name_full = ""
-
-        if class_name_part_1.value is not None:
-            name_full += class_name_part_1.value
-        else:
-            raise Exception(f"class name part 1 is required in worksheet KlassenMap for class key '{class_key.value}'")
-
-        if class_name_part_2.value is not None:
-            name_full += f" {class_name_part_2.value}"
-
-        if class_name_part_3.value is not None:
-            name_full += f" {class_name_part_3.value}"
-
-        class_key_to_full_name_dict[class_key.value] = {
-            "name_part_1": class_name_part_1.value,
-            "name_part_2": class_name_part_2.value,
-            "name_part_3": class_name_part_3.value,
-            "name_full": name_full
-        }
-
-    return class_key_to_full_name_dict
 
 
 def add_class_key_to_all_classes(all_classes, class_key_to_full_name_dict):
@@ -1019,6 +1168,7 @@ def _validate_class_and_teachers(all_classes, all_teachers_list, all_teachers_di
 if __name__ == '__main__':
     excel_extractor = ExcelExtractorGesamtuebersicht(
         'example/SJ 25-26_Gesamtübersicht Einsatz Lehrkräfte EA Halle 2025-05-21_3.xlsx',
+        "example/Mappings.xlsx",
         'example/07_KW 45_03.11.-07.11.2025_IN.xlsm'
     )
     excel_extractor.read_all()

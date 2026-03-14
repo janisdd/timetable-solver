@@ -1,7 +1,7 @@
 from pulp import *
 from tabulate import tabulate
 
-from src.excel_extractor import ExcelExtractor
+from src.excel_extractor_gesamtuebersicht import ExcelExtractorGesamtuebersicht
 from src.excel_extractor_erfassung import ExcelExtractorStundenerfassung
 
 
@@ -511,22 +511,24 @@ def get_stundenplan_tuples_from_vars(stundenplanHelper):
 
 
 # TODO output to new file
-excel_extractor = ExcelExtractor(
-    'example/SJ 25-26_Gesamtübersicht Einsatz Lehrkräfte EA Halle 2025-05-21_3.xlsx',
-    'example/07_KW 45_03.11.-07.11.2025_IN.xlsm'
+excel_extractor = ExcelExtractorGesamtuebersicht(
+    'example_real/SJ 25-26_Gesamtübersicht Einsatz Lehrkräfte EA Halle 2025-05-21_3.xlsx',
+    "example_real/Mappings.xlsx",
+    'example_real/03_KW 10_02.03.-06.03.2026_gesetzteverpflichtende Stunden drin ohne Reste aus Vorwoche_IN.xlsm'
 )
+excel_extractor.read_all()
 
-excel_stundenerfassung = ExcelExtractorStundenerfassung(
-    ['example/Std-erfassung_Erz24A_1. und 2. Sj.xlsx'],
-    0
-)
-
-stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)
-stundenplaner.read_excel_data()
-stundenplaner.read_excel_stundenerfassung()
-stundenplaner.prepare_excel_data()
-stundenplaner.init_new_timetable_problem()
-stundenplaner.setup_fixed_vars()
-stundenplaner.setup_constraints()
-stundenplaner.solve_timetable_problem()
-stundenplaner.write_timetable_solution_to_excel('example/07_KW 45_03.11.-07.11.2025_OUT.xlsm')
+# excel_stundenerfassung = ExcelExtractorStundenerfassung(
+#     ['example/Std-erfassung_Erz24A_1. und 2. Sj.xlsx'],
+#     0
+# )
+#
+# stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)
+# stundenplaner.read_excel_data()
+# stundenplaner.read_excel_stundenerfassung()
+# stundenplaner.prepare_excel_data()
+# stundenplaner.init_new_timetable_problem()
+# stundenplaner.setup_fixed_vars()
+# stundenplaner.setup_constraints()
+# stundenplaner.solve_timetable_problem()
+# stundenplaner.write_timetable_solution_to_excel('example/07_KW 45_03.11.-07.11.2025_OUT.xlsm')

@@ -107,7 +107,7 @@ class ExcelExtractorGesamtuebersicht:
 
         self.color_legend_teacher_availability = self.extract_class_and_teacher_available_color_mapping(wb_mappings)
 
-        class_key_to_full_name_dict = self.extract_class_mapping_from_sheet(wb_mappings)
+        class_key_to_full_name_dict = self.extract_class_mapping_from_sheet(wb_mappings, self.all_classes)
         add_class_key_to_all_classes(self.all_classes, class_key_to_full_name_dict)
 
         self.extract_subject_key_to_subject_mapping_from_sheet(wb_mappings, self.subject_name_to_key_dict)
@@ -116,7 +116,6 @@ class ExcelExtractorGesamtuebersicht:
                                                      data_only=True)
 
         # ################### bis hier ###############################
-
 
         # this is only for reading, no writing!
         extract_teachers_availability_and_prefs_from_sheet(wb_plan_preferences, self.all_teachers_dict,
@@ -334,8 +333,8 @@ class ExcelExtractorGesamtuebersicht:
             "not_allowed_bg_colors_set": not_allowed_colors
         }
 
-    def extract_class_mapping_from_sheet(self, wb_mappings):
-        mapping_worksheet = wb_mappings[MAPPINGS_SHEET_CLASSES]
+    def extract_class_mapping_from_sheet(self, wb_mappings, all_classes):
+        ws_class_mapping = wb_mappings[MAPPINGS_SHEET_CLASSES]
         # mapping from class keys to class full names (3 columns)
         class_key_to_full_name_dict = {}
 
@@ -343,30 +342,36 @@ class ExcelExtractorGesamtuebersicht:
         start_col = 1
         start_row = 10
         # max_row = 100  # until we find empty row, but to be safe here
-        max_row = mapping_worksheet.max_row
+        max_row = ws_class_mapping.max_row
+
+        existing_mapping_but_no_key_set = set()
 
         for row_j in range(start_row, max_row):
-            class_key = mapping_worksheet.cell(row=row_j, column=start_col)
-            class_name_part_1 = mapping_worksheet.cell(row=row_j, column=start_col + 1)
-            class_name_part_2 = mapping_worksheet.cell(row=row_j, column=start_col + 2)
-            class_name_part_3 = mapping_worksheet.cell(row=row_j, column=start_col + 3)
-
-            if class_key.value is None:
-                continue
+            class_key = ws_class_mapping.cell(row=row_j, column=start_col)
+            class_name_part_1 = ws_class_mapping.cell(row=row_j, column=start_col + 1)
+            class_name_part_2 = ws_class_mapping.cell(row=row_j, column=start_col + 2)
+            class_name_part_3 = ws_class_mapping.cell(row=row_j, column=start_col + 3)
 
             name_full = ""
 
             if class_name_part_1.value is not None:
                 name_full += class_name_part_1.value
-            else:
-                raise Exception(
-                    f"[{self.log_name}][mappings excel file] class name part 1 is required in worksheet '{MAPPINGS_SHEET_CLASSES} for class key '{class_key.value}'")
 
             if class_name_part_2.value is not None:
                 name_full += f" {class_name_part_2.value}"
 
             if class_name_part_3.value is not None:
                 name_full += f" {class_name_part_3.value}"
+
+            if class_key.value is None:
+                existing_mapping_but_no_key_set.add(name_full)
+                Logger.warn(
+                    f"[{self.log_name}][mappings excel file] class mapping in row {row_j} is empty, IGNORING CLASS (class name parts: {name_full})")
+                continue
+
+            if class_name_part_1.value is None:
+                raise Exception(
+                    f"[{self.log_name}][mappings excel file] class name part 1 is required in worksheet '{MAPPINGS_SHEET_CLASSES} for class key '{class_key.value}'")
 
             class_key_to_full_name_dict[class_key.value] = {
                 "name_part_1": class_name_part_1.value,
@@ -377,6 +382,40 @@ class ExcelExtractorGesamtuebersicht:
 
         Logger.debug(
             f"[{self.log_name}][mappings excel file] class mapping ({len(class_key_to_full_name_dict)}): {class_key_to_full_name_dict}")
+
+        # now check if we have an entry for each class
+
+        not_found_classes = []
+
+        for class_obj in all_classes:
+            class_name_single_line = class_obj['name_single_line']
+            found_class_key = False
+
+            for class_key, class_name_infos in class_key_to_full_name_dict.items():
+                if class_name_infos['name_full'] == class_name_single_line:
+                    found_class_key = True
+                    break
+            if not found_class_key:
+
+                if class_name_single_line in existing_mapping_but_no_key_set:
+                    continue
+
+                not_found_classes.append(class_obj)
+                Logger.error(
+                    f"[{self.log_name}][mappings excel file] class '{class_name_single_line}' not found in class mapping, will be inserted for you!")
+
+        if len(not_found_classes) > 0:
+
+            for i, class_obj in enumerate(not_found_classes):
+                class_name_parts = class_obj['name_fields']
+
+                ws_class_mapping.cell(row=max_row + 1 + i, column=1).value = None  # must be filled by the user
+                for j, part in enumerate(class_name_parts):
+                    ws_class_mapping.cell(row=max_row + 1 + i, column=2 + j).value = part
+
+            wb_mappings.save(self.excel_file_mappings)
+            raise Exception(
+                f"[{self.log_name}][mappings excel file] {len(not_found_classes)} classes not found in class mapping.")
 
         return class_key_to_full_name_dict
 
@@ -488,14 +527,14 @@ def extract_classes_with_data_from_sheet(self, ws):
             f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' range: col ({range_class_name[0]} - {range_class_name[2]}), row ({range_class_name[1]} - {range_class_name[3]}))")
         class_name_lines = []
 
-        class_name_lines.append(curr_class.value)
+        class_name_lines.append(curr_class.value.strip())
         # extract class data
         if range_class_name[1] == range_class_name[3]:
             # whole class in one merged cell (same row)
             # so check the next rows until we get to row 6 (row 6 are the subjects)
             class_data_2 = ws.cell(row=range_class_name[1] + 1, column=range_class_name[0])
             range_class_data_2 = get_cell_range_from_merged_cells(ws, class_data_2)
-            class_name_lines.append(class_data_2.value)
+            class_name_lines.append(class_data_2.value.strip() if class_data_2.value is not None else "")
             Logger.debug(f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' name2: {class_data_2.value}")
 
             if range_class_data_2[1] == range_class_data_2[3]:
@@ -507,7 +546,7 @@ def extract_classes_with_data_from_sheet(self, ws):
                     Logger.debug(
                         f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' name2: {class_data_2.value}, name3: None")
                 else:
-                    class_name_lines.append(class_data_3.value)
+                    class_name_lines.append(class_data_3.value.strip())
                     Logger.debug(
                         f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' name2: {class_data_2.value}, name3: {class_data_3.value}")
 
@@ -528,14 +567,14 @@ def extract_classes_with_data_from_sheet(self, ws):
                     Logger.debug(
                         f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' (name1 is >= 1 row heigh), name3: None")
                 else:
-                    class_name_lines.append(class_data_3.value)
+                    class_name_lines.append(class_data_3.value.strip())
                     Logger.debug(
                         f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' (name1 is >= 1 row heigh), name3: {class_data_3.value}")
 
         class_obj = {
-            "name": str.join("\n", class_name_lines),
+            "name": str.join("\n", class_name_lines).strip(),
             "name_fields": class_name_lines,
-            "name_single_line": str.join(" ", class_name_lines),
+            "name_single_line": str.join(" ", class_name_lines).strip(),
             "col_range": [range_class_name[0], range_class_name[2]],
             "subjects": [],  # {"name", "col", "coord"}
             "fake_subjects": []
@@ -923,19 +962,16 @@ def add_class_key_to_all_classes(all_classes, class_key_to_full_name_dict):
     classes_to_remove = []
 
     for class_obj in all_classes:
-        class_name_fields = class_obj["name_fields"]
-
-        class_name_fields_not_empty = [x for x in class_name_fields if x is not None and x != ""]
-        class_name_full = str.join(" ", class_name_fields_not_empty)
+        class_name_full = class_obj["name_single_line"]
 
         for class_key, class_name_infos in class_key_to_full_name_dict.items():
             if class_name_infos['name_full'] == class_name_full:
                 class_obj["key"] = class_key
-                print(f"class '{class_name_full}' has key '{class_key}'")
+                Logger.debug(f"class '{class_name_full}' has key '{class_key}'")
                 break
         if "key" not in class_obj:
-            print(
-                f"warning: class '{class_name_full}' has no key in sheet 'KlassenMap' but has data in hours data excel table, DISCARDING!")
+            Logger.warn(
+                f"warning: class '{class_name_full}' has no key in sheet '{MAPPINGS_SHEET_CLASSES}' but has data in hours data excel table, DISCARDING!")
             classes_to_remove.append(class_obj)
 
     for class_obj in classes_to_remove:

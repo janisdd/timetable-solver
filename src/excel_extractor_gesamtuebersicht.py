@@ -118,8 +118,11 @@ class ExcelExtractorGesamtuebersicht:
         # ################### bis hier ###############################
 
         # this is only for reading, no writing!
-        extract_teachers_availability_and_prefs_from_sheet(wb_plan_preferences, self.all_teachers_dict,
-                                                           self.color_legend_teacher_availability)
+        extract_teachers_availability_and_prefs_from_sheet(wb_plan_preferences,
+                                                           self.all_teachers_dict,
+                                                           self.all_teachers_list,
+                                                           self.color_legend_teacher_availability,
+                                                           self.all_classes)
 
         _teacher_sanity_checks(self.all_teachers_dict, self.all_teachers_list, self.all_classes)
 
@@ -849,8 +852,8 @@ def extract_subject_mapping_from_sheet(ws_dozenten, all_teachers_dict):
     return subject_teacher_pair_by_class_name_dict
 
 
-# TODO rework
-def extract_teachers_availability_and_prefs_from_sheet(wb_prefs, all_teachers_dict, color_legend_teacher_availability):
+def extract_teachers_availability_and_prefs_from_sheet(wb_prefs, all_teachers_dict, all_teachers_list,
+                                                       color_legend_teacher_availability, all_classes):
     # dozenten_worksheet = wb_prefs["Dozenten"]
 
     # not needed anymore, we now use extract_subject_key_to_subject_mapping_from_sheet
@@ -860,11 +863,41 @@ def extract_teachers_availability_and_prefs_from_sheet(wb_prefs, all_teachers_di
     # tuple of worksheet and teacher key
     relevant_work_sheets = []
 
+    all_found_worksheet_teacher_names = set()
+
     for sheet in wb_prefs:
         worksheet_name = sheet.title  # to lower?
 
         if worksheet_name in all_teachers_dict:
             relevant_work_sheets.append((sheet, worksheet_name))
+            all_found_worksheet_teacher_names.add(worksheet_name)  # this is the teacher name
+
+    teachers_to_remove = []
+    for key, teacher_obj in all_teachers_dict.items():
+        if teacher_obj["key"] not in all_found_worksheet_teacher_names:
+            Logger.warn(
+                f"Teacher '{Logger.get_teacher_full(teacher_obj)}' (contract form: {teacher_obj['contract_form']}) has no worksheet/plan -> WILL BE IGNORED (and all connections to classes with subjects will be removed!)")
+            teachers_to_remove.append(teacher_obj)
+
+    for teacher_obj in teachers_to_remove:
+        key = teacher_obj["key"]
+        all_teachers_list.remove(teacher_obj)
+        del all_teachers_dict[key]
+
+        # check if the teacher is associated with a class
+        for class_obj in all_classes:
+            subject_objs = class_obj["subjects"]
+            for subject_obj in subject_objs:
+                teacher_with_hours_to_remove = []
+                for teacher_with_hours in subject_obj["teachers_with_hours"]:
+                    if teacher_with_hours["teacher_key"] == key:
+                        teacher_with_hours_to_remove.append(teacher_with_hours)
+
+                for teacher_with_hours in teacher_with_hours_to_remove:
+                    subject_obj["teachers_with_hours"].remove(teacher_with_hours)
+                    Logger.log(
+                        f"Teacher '{Logger.get_teacher_full(teacher_obj)}' is associated with class '{class_obj['key']}' with subject '{subject_obj['name']}' -> teacher was removed from class with subject because teacher has no plan")
+
 
     error_count = 0
 

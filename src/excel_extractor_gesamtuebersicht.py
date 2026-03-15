@@ -259,11 +259,19 @@ class ExcelExtractorGesamtuebersicht:
     def extract_subject_key_to_subject_mapping_from_sheet(self, wb_mappings, subject_name_to_key_dict):
         mapping_worksheet = wb_mappings[MAPPINGS_SHEET_SUBJECTS]
 
+        # all_known_subjects = set()
+        #
+        # for class_obj in all_classes:
+        #     subjects_list = class_obj['subjects']
+        #     for subject_obj in subjects_list:
+        #         subject_name = subject_obj['name']
+        #         all_known_subjects.add(subject_name)
+
         # subject short | subject name
         start_col = 1
         start_row = 10
         # max_row = 1000  # until we find empty row, but to be safe here
-        max_row = mapping_worksheet.max_row
+        max_row = mapping_worksheet.max_row + 1
         error_count = 0
         found_subject_names = []
 
@@ -272,30 +280,48 @@ class ExcelExtractorGesamtuebersicht:
             subject_name_cell = mapping_worksheet.cell(row=row_j, column=start_col + 1)
 
             if subject_short_cell.value is None:
-                break
+                raise Exception(
+                    f"[{self.log_name}][mapping excel file] subject short form is None in row {row_j}, column {start_col} (name: {subject_name_cell.value})")
 
             subject_short = subject_short_cell.value
             subject_name = subject_name_cell.value
 
+            # subject_name_to_key_dict contains all subject names with None as key
             if subject_name not in subject_name_to_key_dict:
-                print(
-                    f"warning: subject '{subject_name}' from mapping sheet 'FächerMap' has not real subject -> ignoring")
                 Logger.warn(
                     f"[{self.log_name}][mapping excel file] no class has subject '{subject_name}' in sheet '{MAPPINGS_SHEET_SUBJECTS}'")
                 continue
 
             found_subject_names.append(subject_name)
+
+            if subject_name_to_key_dict[subject_name] is not None:
+                Logger.warn(
+                    f"[{self.log_name}][mapping excel file] subject '{subject_name}' already has a short form in sheet '{MAPPINGS_SHEET_SUBJECTS}'")
+                error_count += 1
+
             subject_name_to_key_dict[subject_name] = subject_short
 
+        if error_count > 0:
+            raise Exception(
+                f"[{self.log_name}][mapping excel file] {error_count} errors in subject mapping, sheet '{MAPPINGS_SHEET_SUBJECTS}'")
+
         # not check if all know subjects have a short form
+        new_lines_count = 0
         known_subjects = list(subject_name_to_key_dict.keys())
         for subject_name in known_subjects:
             subject_short_form = subject_name_to_key_dict[subject_name]
 
             if subject_short_form is None:
                 Logger.error(
-                    f"[{self.log_name}][mapping excel file] subject '{subject_name}' has no short form in sheet '{MAPPINGS_SHEET_SUBJECTS}'")
+                    f"[{self.log_name}][mapping excel file] subject '{subject_name}' has no short form in sheet '{MAPPINGS_SHEET_SUBJECTS}', adding it for you!")
                 error_count += 1
+
+                mapping_worksheet.cell(row=max_row + new_lines_count, column=start_col).value = None
+                mapping_worksheet.cell(row=max_row + new_lines_count, column=start_col + 1).value = subject_name
+                new_lines_count += 1
+
+        if new_lines_count > 0:
+            wb_mappings.save(self.excel_file_mappings)
 
         if error_count > 0:
             raise Exception(f"[{self.log_name}][mapping excel file] {error_count} errors in subject mapping")
@@ -346,7 +372,7 @@ class ExcelExtractorGesamtuebersicht:
 
         existing_mapping_but_no_key_set = set()
 
-        for row_j in range(start_row, max_row):
+        for row_j in range(start_row, max_row + 1):
             class_key = ws_class_mapping.cell(row=row_j, column=start_col)
             class_name_part_1 = ws_class_mapping.cell(row=row_j, column=start_col + 1)
             class_name_part_2 = ws_class_mapping.cell(row=row_j, column=start_col + 2)
@@ -364,6 +390,9 @@ class ExcelExtractorGesamtuebersicht:
                 name_full += f" {class_name_part_3.value}"
 
             if class_key.value is None:
+                if name_full == "":  # ignore empty lines
+                    continue
+
                 existing_mapping_but_no_key_set.add(name_full)
                 Logger.warn(
                     f"[{self.log_name}][mappings excel file] class mapping in row {row_j} is empty, IGNORING CLASS (class name parts: {name_full})")
@@ -372,6 +401,10 @@ class ExcelExtractorGesamtuebersicht:
             if class_name_part_1.value is None:
                 raise Exception(
                     f"[{self.log_name}][mappings excel file] class name part 1 is required in worksheet '{MAPPINGS_SHEET_CLASSES} for class key '{class_key.value}'")
+
+            if class_key.value in class_key_to_full_name_dict:
+                raise Exception(
+                    f"[{self.log_name}][mappings excel file] class key '{class_key.value}' is already in class mapping")
 
             class_key_to_full_name_dict[class_key.value] = {
                 "name_part_1": class_name_part_1.value,

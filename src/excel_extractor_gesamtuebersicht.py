@@ -143,14 +143,12 @@ class ExcelExtractorGesamtuebersicht:
         # this also removes empty classes (no subjects)
         self._validate_class_and_teachers(self.all_classes, self.all_teachers_list, self.all_teachers_dict)
 
-        # ################### bis hier ###############################
-
-        self._get_class_keys_to_all_classes_index_mapping(all_table_data_dict, self.all_classes)
+        self._set_class_plans(all_table_data_dict, self.all_classes)
 
         wb_overview_classes.close()
         wb_plan_preferences.close()
         # we are only allowed to write to "PLAN" sheet
-        print("finished reading excel files")
+        Logger.log(f"[{self.log_name}] finished reading excel files")
 
     def _ensure_mappings_file_exists_and_required_sheets(self, excel_file_mappings, all_classes,
                                                          subject_name_to_key_dict):
@@ -826,7 +824,7 @@ class ExcelExtractorGesamtuebersicht:
         return True
 
     # obsolete
-    def extract_subject_mapping_from_sheet(self, ws_dozenten, all_teachers_dict):
+    def __extract_subject_mapping_from_sheet(self, ws_dozenten, all_teachers_dict):
         start_col = 1
         max_col = 100
         # no end col, we read until we find a class without a trailing dot
@@ -888,7 +886,7 @@ class ExcelExtractorGesamtuebersicht:
                 for teacher_with_hours in teacher_with_hours_to_remove:
                     subject_obj["teachers_with_hours"].remove(teacher_with_hours)
                     Logger.log(
-                        f"Teacher '{Logger.get_teacher_full(teacher_obj)}' is associated with class '{class_obj['key']}' with subject '{subject_obj['name']}' -> teacher was removed from class with subject")
+                        f"[{self.log_name}] teacher '{Logger.get_teacher_full(teacher_obj)}' is associated with class '{class_obj['key']}' with subject '{subject_obj['name']}' -> teacher was removed from class with subject")
 
     def extract_teachers_availability_and_prefs_from_sheet(self, wb_prefs, all_teachers_dict, all_teachers_list,
                                                            color_legend_teacher_availability, all_classes):
@@ -914,7 +912,7 @@ class ExcelExtractorGesamtuebersicht:
         for key, teacher_obj in all_teachers_dict.items():
             if teacher_obj["key"] not in all_found_worksheet_teacher_names:
                 Logger.warn(
-                    f"Teacher '{Logger.get_teacher_full(teacher_obj)}' (contract form: {teacher_obj['contract_form']}) has no worksheet/plan -> WILL BE IGNORED (and all connections to classes with subjects will be removed!)")
+                    f"[{self.log_name}] teacher '{Logger.get_teacher_full(teacher_obj)}' (contract form: {teacher_obj['contract_form']}) has no worksheet/plan -> WILL BE IGNORED (and all connections to classes with subjects will be removed!)")
                 teachers_to_remove.append(teacher_obj)
 
         for teacher_obj in teachers_to_remove:
@@ -944,7 +942,7 @@ class ExcelExtractorGesamtuebersicht:
 
             if availability_preference_table is None:
                 Logger.warn(
-                    f"teacher {Logger.get_teacher_full(teacher_obj)} has no availability plan -> teacher will not be used / removed!")
+                    f"[{self.log_name}] teacher {Logger.get_teacher_full(teacher_obj)} has no availability plan -> teacher will not be used / removed!")
                 teachers_to_ignore.append(teacher_obj)
                 continue
 
@@ -961,7 +959,7 @@ class ExcelExtractorGesamtuebersicht:
 
                         if not is_known_class:
                             Logger.warn(
-                                f"teacher {Logger.get_teacher_full(teacher_obj)} has availability plan entry for unknown class '{prefilled_class}' on day index '{day_index}' slot '{slot_index}' -> slot will be set to skip/not allowed")
+                                f"[{self.log_name}] teacher {Logger.get_teacher_full(teacher_obj)} has availability plan entry for unknown class '{prefilled_class}' on day index '{day_index}' slot '{slot_index}' -> slot will be set to skip/not allowed")
                             slot_obj['allowed'] = False
                             slot_obj['class_key'] = None
 
@@ -987,7 +985,7 @@ class ExcelExtractorGesamtuebersicht:
 
                     if teacher_key not in all_teachers_dict:
                         Logger.error(
-                            f" teacher '{teacher_key}' [{teacher_full_name}] not found in teacher list for class '{class_key}' [{class_name_single_line}] and subject '{subject_name}'")
+                            f"[{self.log_name}] teacher '{teacher_key}' [{teacher_full_name}] not found in teacher list for class '{class_key}' [{class_name_single_line}] and subject '{subject_name}'")
                         # raise Exception(msg)
                         error_count += 1
 
@@ -1058,11 +1056,11 @@ class ExcelExtractorGesamtuebersicht:
             for class_key, class_name_infos in class_key_to_full_name_dict.items():
                 if class_name_infos['name_full'] == class_name_full:
                     class_obj["key"] = class_key
-                    Logger.debug(f"class '{class_name_full}' has key '{class_key}'")
+                    Logger.debug(f"[{self.log_name}] class '{class_name_full}' has key '{class_key}'")
                     break
             if "key" not in class_obj:
                 Logger.warn(
-                    f"warning: class '{class_name_full}' has no key in sheet '{MAPPINGS_SHEET_CLASSES}' but has data in hours data excel table, DISCARDING!")
+                    f"[{self.log_name}]  class '{class_name_full}' has no key in sheet '{MAPPINGS_SHEET_CLASSES}' but has data in hours data excel table, DISCARDING!")
                 classes_to_remove.append(class_obj)
 
         for class_obj in classes_to_remove:
@@ -1181,32 +1179,33 @@ class ExcelExtractorGesamtuebersicht:
 
         return all_table_data_dict
 
-    def _get_class_keys_to_all_classes_index_mapping(self, all_table_data_dict, all_classes):
-        # all_table_data_dict[class_key] = [table_dates, table_column_data]
+    def _set_class_plans(self, all_table_data_dict, all_classes):
+        # all_table_data_dict[class_key] = [table_dates, table_column_data, {
+        #             "start_row": table_start_row,
+        #             "start_col": table_start_col
+        #         }]
 
         used_class_keys = []
 
         for class_obj in all_classes:
             class_key = class_obj["key"]
             if class_key not in all_table_data_dict:
-                print(
-                    f"warning: class key '{class_key}' was not found in table data (Plan) but has data in hours data excel table with subjects")
+                Logger.warn(f"class key '{class_key}' was not found in table data (Sheet {SHEET_OVERVIEW_PLAN}) but has data in hours data excel table with subjects")
                 continue
             used_class_keys.append(class_key)
             class_obj['table_dates'] = all_table_data_dict[class_key]
 
+        # we found plan (schedule) tables for these classes
         all_table_data_class_keys = list(all_table_data_dict.keys())
 
         difference_class_keys = list(set(all_table_data_class_keys) - set(used_class_keys))
 
         for class_key in difference_class_keys:
-            print(
-                f"warning: class key '{class_key}' has table data (Plan) but was not found in all classes (hours data excel table with subjects) -> ignoring")
+            Logger.warn(f"[{self.log_name}] class key '{class_key}' has table data (Sheet {SHEET_OVERVIEW_PLAN}) but was not found in all classes (hours data excel table with subjects) -> ignoring class")
 
-        pass
 
     def _validate_class_and_teachers(self, all_classes, all_teachers_list, all_teachers_dict):
-        Logger.log("--- validating class teachers ---")
+        Logger.log(f"[{self.log_name}] --- validating class teachers ---")
 
         error_count = 0
 
@@ -1215,7 +1214,7 @@ class ExcelExtractorGesamtuebersicht:
         for class_obj in all_classes:
             class_subjects = class_obj["subjects"]
 
-            class_log_name = f"'{class_obj['key']}' ({class_obj['name_full']})"
+            class_log_name = f"'{class_obj['key']}' ({class_obj['name_single_line']})"
 
             if len(class_subjects) == 0:
                 Logger.warn(
@@ -1267,14 +1266,14 @@ class ExcelExtractorGesamtuebersicht:
                 class_obj["subjects"].remove(class_subject)
 
             if len(class_obj["subjects"]) == 0:
-                Logger.warn(f"class {class_log_name} has no subjects left after validation -> will not be processed")
+                Logger.warn(f"[{self.log_name}][Validation] class {class_log_name} has no subjects left after validation -> will not be processed")
                 classes_to_remove.append(class_obj)
                 continue
 
         for class_obj in classes_to_remove:
-            class_log_name = f"'{class_obj['key']}' ({class_obj['name_full']})"
+            class_log_name = f"'{class_obj['key']}' ({class_obj['name_single_line']})"
             all_classes.remove(class_obj)
-            Logger.warn(f"class {class_log_name} has no subjects left after validation -> class will not be processed")
+            Logger.warn(f"[{self.log_name}][Validation] class {class_log_name} has no subjects left after validation -> class will not be processed")
 
         used_teachers = set()
         teachers_to_remove = []
@@ -1296,7 +1295,7 @@ class ExcelExtractorGesamtuebersicht:
         for teacher_obj in all_teachers_list:
             teacher_key = teacher_obj["key"]
             if teacher_key not in used_teachers:
-                Logger.warn(f"warning: teacher {Logger.get_teacher_full(teacher_obj)} not used in any class -> teacher will be removed/ignored in plan")
+                Logger.warn(f"[{self.log_name}][Validation] teacher {Logger.get_teacher_full(teacher_obj)} not used in any class -> teacher will be removed from all")
                 teachers_to_remove.append(teacher_obj)
 
         for teacher_obj in teachers_to_remove:
@@ -1306,7 +1305,7 @@ class ExcelExtractorGesamtuebersicht:
 
         if error_count > 0:
             # print(f"TODO {error_count} errors in teacher availability preferences")
-            raise Exception(f" {error_count} errors in teacher availability preferences")
+            raise Exception(f"[{self.log_name}][Validation] {error_count} errors in teacher availability preferences")
 
 
 if __name__ == '__main__':

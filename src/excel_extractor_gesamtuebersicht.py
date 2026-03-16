@@ -9,7 +9,6 @@ MAPPINGS_SHEET_COLORS = "farben"
 MAPPINGS_SHEET_CLASSES = "klassen"
 MAPPINGS_SHEET_SUBJECTS = "fächer"
 
-
 SHEET_OVERVIEW_PLAN = 'Plan'
 
 # true: we only use every 2nd slot
@@ -126,23 +125,25 @@ class ExcelExtractorGesamtuebersicht:
 
         # this is only for reading, no writing!
         self.extract_teachers_availability_and_prefs_from_sheet(wb_plan_preferences,
-                                                           self.all_teachers_dict,
-                                                           self.all_teachers_list,
-                                                           self.color_legend_teacher_availability,
-                                                           self.all_classes)
+                                                                self.all_teachers_dict,
+                                                                self.all_teachers_list,
+                                                                self.color_legend_teacher_availability,
+                                                                self.all_classes)
 
         self._teacher_sanity_checks(self.all_teachers_dict, self.all_teachers_list, self.all_classes)
 
         # sets which slots should be filled and what should be ignored
-        self.make_teacher_availability_and_prefs_canonical(self.all_teachers_list, self.color_legend_teacher_availability)
-
+        self.make_teacher_availability_and_prefs_canonical(self.all_teachers_list,
+                                                           self.color_legend_teacher_availability)
 
         all_table_data_dict = self.extract_current_plan_from_sheet(wb_plan_preferences,
-                                                              self.color_legend_teacher_availability)
+                                                                   self.color_legend_teacher_availability)
 
-        # ################### bis hier ###############################
+
         # this also removes empty classes (no subjects)
         self._validate_class_and_teachers(self.all_classes, self.all_teachers_list, self.all_teachers_dict)
+
+        # ################### bis hier ###############################
 
         self._get_class_keys_to_all_classes_index_mapping(all_table_data_dict, self.all_classes)
 
@@ -526,7 +527,6 @@ class ExcelExtractorGesamtuebersicht:
         wb_plan_output.save(output_file_path)
         # wb_plan_output.close()
 
-
     def get_excel_rect_data_as_array(self, ws, min_row, max_row, min_col, max_col):
         array = []
         for row in range(min_row, max_row + 1):
@@ -545,15 +545,13 @@ class ExcelExtractorGesamtuebersicht:
 
         return array
 
-
     def get_cell_range_from_merged_cells(self, ws, cell):
         merged_cells = ws.merged_cells.ranges
         for merged_cell in merged_cells:
             if cell.coordinate in merged_cell:
                 return merged_cell.bounds  # col, row, col, row
 
-
-    def extract_classes_with_data_from_sheet(self,  ws):
+    def extract_classes_with_data_from_sheet(self, ws):
         start_row = 3
         start_col = 10  # J
         subjects_start_row = 6
@@ -677,7 +675,6 @@ class ExcelExtractorGesamtuebersicht:
 
         return all_classes
 
-
     def extract_and_set_teacher_hours_from_sheet(self, ws, all_classes, all_teachers_list, teacher_row_start):
         for class_obj in all_classes:
             subject_objs = class_obj["subjects"]
@@ -697,7 +694,6 @@ class ExcelExtractorGesamtuebersicht:
                     })
                     Logger.debug(
                         f"[{self.log_name}] [{ws.title}] [{class_obj['name_single_line']}] teacher '{Logger.get_teacher_full(teacher_obj)}' found '{hours_for_teacher_cell.value}' hours for subject '{subject_obj['name']}' [cell: {Logger.get_cell_full_coord(hours_for_teacher_cell)}]")
-
 
     def get_all_teachers_from_rect_data(self, teacher_datas):
         all_teachers_dict = {}
@@ -725,7 +721,6 @@ class ExcelExtractorGesamtuebersicht:
 
         return all_teachers_list, all_teachers_dict
 
-
     def extract_all_data_from_sheet(self, ws):
         # key is "teacher key" (or nummer in excel/german)
         # value is hash with data
@@ -739,7 +734,7 @@ class ExcelExtractorGesamtuebersicht:
         Logger.debug(f"[{self.log_name}] [{ws.title}] getting data in rect: min_row, max_row, min_col, max_col: "
                      f"{teacher_row_start}, {teacher_end_row}, {teacher_start_col}, {teacher_end_col}")
         teacher_datas = self.get_excel_rect_data_as_array(ws, teacher_row_start, teacher_end_row, teacher_start_col,
-                                                     teacher_end_col)
+                                                          teacher_end_col)
 
         Logger.debug(f"[{self.log_name}] [{ws.title}] converting rect teacher data to teacher objs")
         all_teachers_list, all_teachers_dict = self.get_all_teachers_from_rect_data(teacher_datas)
@@ -759,11 +754,9 @@ class ExcelExtractorGesamtuebersicht:
             "all_classes": all_classes,
         }
 
-
     def get_cell_color(self, cell):
         # excel uses #aarrggbb for colors, use fgColor in fill!! (bg is for patterns)
         return cell.fill.fgColor
-
 
     def extract_and_set_single_teacher_availability_preferences_from_sheet(self, ws, teacher_obj,
                                                                            color_legend_teacher_availability):
@@ -787,7 +780,6 @@ class ExcelExtractorGesamtuebersicht:
         preferences_cells = []  # 2d, column wise
 
         has_known_color = None
-
 
         # real data
         for col_i in range(start_col, end_col + 1):
@@ -813,9 +805,10 @@ class ExcelExtractorGesamtuebersicht:
 
                             # see https://openpyxl.readthedocs.io/en/3.1.3/_modules/openpyxl/styles/colors.html#Color
                             if cell_obj["color"].rgb == KNOWN_COLOR_BLACK or cell_obj["color"].rgb != KNOWN_COLOR_WHITE:
-                                pass # this is ok
+                                pass  # this is ok
                             else:
-                                Logger.error(f"[{self.log_name}][Sheet {teacher_obj['key']}] teacher {Logger.get_teacher_full(teacher_obj)} has both allowed and not allowed colors")
+                                Logger.error(
+                                    f"[{self.log_name}][Sheet {teacher_obj['key']}] teacher {Logger.get_teacher_full(teacher_obj)} has both allowed and not allowed colors")
                                 return False
 
                     if cell_obj["color"] in color_legend_teacher_availability["not_allowed_bg_colors_set"]:
@@ -831,7 +824,6 @@ class ExcelExtractorGesamtuebersicht:
         # print(f"{teacher_obj['key']}")
 
         return True
-
 
     # obsolete
     def extract_subject_mapping_from_sheet(self, ws_dozenten, all_teachers_dict):
@@ -870,13 +862,13 @@ class ExcelExtractorGesamtuebersicht:
                         print(f"warning: teacher key is empty for subject {subject} for class {class_name}")
                         continue
                     if teacher_key not in all_teachers_dict:
-                        print(f"warning: teacher key {teacher_key} not found for subject {subject} for class {class_name}")
+                        print(
+                            f"warning: teacher key {teacher_key} not found for subject {subject} for class {class_name}")
                         continue
 
                     subject_teacher_pair.append({"subject": subject, "teacher_key": teacher_key})
 
         return subject_teacher_pair_by_class_name_dict
-
 
     def _remove_teacher_and_from_class_subjects(self, teacher_obj, all_teachers_dict, all_teachers_list, all_classes):
 
@@ -897,8 +889,6 @@ class ExcelExtractorGesamtuebersicht:
                     subject_obj["teachers_with_hours"].remove(teacher_with_hours)
                     Logger.log(
                         f"Teacher '{Logger.get_teacher_full(teacher_obj)}' is associated with class '{class_obj['key']}' with subject '{subject_obj['name']}' -> teacher was removed from class with subject")
-
-
 
     def extract_teachers_availability_and_prefs_from_sheet(self, wb_prefs, all_teachers_dict, all_teachers_list,
                                                            color_legend_teacher_availability, all_classes):
@@ -935,7 +925,7 @@ class ExcelExtractorGesamtuebersicht:
         for sheet, teacher_key in relevant_work_sheets:
             teacher_obj = all_teachers_dict[teacher_key]
             all_ok = self.extract_and_set_single_teacher_availability_preferences_from_sheet(sheet, teacher_obj,
-                                                                                        color_legend_teacher_availability)
+                                                                                             color_legend_teacher_availability)
 
             if not all_ok:
                 error_count += 1
@@ -945,7 +935,6 @@ class ExcelExtractorGesamtuebersicht:
 
         return None
 
-
     def _teacher_sanity_checks(self, all_teachers_dict, all_teachers_list, all_classes):
         teachers_to_ignore = []
         # check every valid teacher has availability preferences
@@ -954,7 +943,8 @@ class ExcelExtractorGesamtuebersicht:
             availability_preference_table = teacher_obj['availability_preference_table']
 
             if availability_preference_table is None:
-                Logger.warn(f"teacher {Logger.get_teacher_full(teacher_obj)} has no availability plan -> teacher will not be used / removed!")
+                Logger.warn(
+                    f"teacher {Logger.get_teacher_full(teacher_obj)} has no availability plan -> teacher will not be used / removed!")
                 teachers_to_ignore.append(teacher_obj)
                 continue
 
@@ -970,7 +960,8 @@ class ExcelExtractorGesamtuebersicht:
                                 break
 
                         if not is_known_class:
-                            Logger.warn(f"teacher {Logger.get_teacher_full(teacher_obj)} has availability plan entry for unknown class '{prefilled_class}' on day index '{day_index}' slot '{slot_index}' -> slot will be set to skip/not allowed")
+                            Logger.warn(
+                                f"teacher {Logger.get_teacher_full(teacher_obj)} has availability plan entry for unknown class '{prefilled_class}' on day index '{day_index}' slot '{slot_index}' -> slot will be set to skip/not allowed")
                             slot_obj['allowed'] = False
                             slot_obj['class_key'] = None
 
@@ -995,14 +986,14 @@ class ExcelExtractorGesamtuebersicht:
                     teacher_full_name = teacher_info['teacher_full_name']
 
                     if teacher_key not in all_teachers_dict:
-                        Logger.error(f" teacher '{teacher_key}' [{teacher_full_name}] not found in teacher list for class '{class_key}' [{class_name_single_line}] and subject '{subject_name}'")
+                        Logger.error(
+                            f" teacher '{teacher_key}' [{teacher_full_name}] not found in teacher list for class '{class_key}' [{class_name_single_line}] and subject '{subject_name}'")
                         # raise Exception(msg)
                         error_count += 1
 
         if error_count > 0:
             # print(f"TODO {error_count} errors in teacher availability preferences")
             raise Exception(f" {error_count} errors in teacher availability preferences")
-
 
     # we only use blacklists
     # we set for every slot if it should be filled or not
@@ -1058,7 +1049,6 @@ class ExcelExtractorGesamtuebersicht:
                         else:
                             slot_obj["allowed"] = False
 
-
     def add_class_key_to_all_classes(self, all_classes, class_key_to_full_name_dict):
         classes_to_remove = []
 
@@ -1078,9 +1068,9 @@ class ExcelExtractorGesamtuebersicht:
         for class_obj in classes_to_remove:
             all_classes.remove(class_obj)
 
-
     # see extract_single_teacher_preferences_from_sheet
-    def extract_current_single_plan_from_sheet(self, ws_plan, curr_row, curr_col, class_name, color_legend_teacher_availability):
+    def extract_current_single_plan_from_sheet(self, ws_plan, curr_row, curr_col, class_name,
+                                               color_legend_teacher_availability):
         curr_class_name_cell = ws_plan.cell(row=curr_row, column=curr_col)
 
         slots_per_day = 8
@@ -1114,7 +1104,8 @@ class ExcelExtractorGesamtuebersicht:
 
             if self.get_cell_color(ignore_day_cell) in color_legend_teacher_availability['not_allowed_bg_colors_set']:
                 should_ignore_day = True
-                Logger.log(f"[{self.log_name}][Sheet {SHEET_OVERVIEW_PLAN}] ignoring whole day index {day_index}/{num_days} ({dates[day_index]}) because of color below column for class '{class_name}'")
+                Logger.log(
+                    f"[{self.log_name}][Sheet {SHEET_OVERVIEW_PLAN}] ignoring whole day index {day_index}/{num_days} ({dates[day_index]}) because of color below column for class '{class_name}'")
 
             # set all slots to ignore
             if should_ignore_day:
@@ -1125,7 +1116,6 @@ class ExcelExtractorGesamtuebersicht:
             day_index += 1
 
         return dates, table
-
 
     # extract the current state of the plan from the sheet
     # the task is to fill out ONLY the missing fields
@@ -1167,7 +1157,7 @@ class ExcelExtractorGesamtuebersicht:
                 else:
                     # extract single
                     table_data = self.extract_current_single_plan_from_sheet(ws_plan, curr_row, curr_col, class_key,
-                                                                        color_legend_teacher_availability)
+                                                                             color_legend_teacher_availability)
                     table_dates = table_data[0]
                     table_column_data = table_data[1]
                     # here is the class name
@@ -1190,7 +1180,6 @@ class ExcelExtractorGesamtuebersicht:
                 break
 
         return all_table_data_dict
-
 
     def _get_class_keys_to_all_classes_index_mapping(self, all_table_data_dict, all_classes):
         # all_table_data_dict[class_key] = [table_dates, table_column_data]
@@ -1216,9 +1205,8 @@ class ExcelExtractorGesamtuebersicht:
 
         pass
 
-
     def _validate_class_and_teachers(self, all_classes, all_teachers_list, all_teachers_dict):
-        print("--- validating class teachers...")
+        Logger.log("--- validating class teachers ---")
 
         error_count = 0
 
@@ -1227,30 +1215,35 @@ class ExcelExtractorGesamtuebersicht:
         for class_obj in all_classes:
             class_subjects = class_obj["subjects"]
 
-            class_log_name = f"'{class_obj['key']}' (class_obj['name_full'])"
+            class_log_name = f"'{class_obj['key']}' ({class_obj['name_full']})"
 
             if len(class_subjects) == 0:
-                Logger.warn(f"[{self.log_name}][Validation] class {class_log_name} has no subjects -> will not be processed")
+                Logger.warn(
+                    f"[{self.log_name}][Validation] class {class_log_name} has no subjects -> will not be processed")
                 continue
 
             class_subjects_to_remove = []
 
             for class_subject in class_subjects:
+                teachers_to_remove = []
                 subject_teacher_objs = class_subject["teachers_with_hours"]
                 hours_term = class_subject["hours_term"]
 
                 if type(hours_term) == str:
-                    Logger.warn(f"[{self.log_name}][Validation] class {class_log_name} has subject '{class_subject['name']}' with hours term '{hours_term}' -> subject will be removed from class")
+                    Logger.warn(
+                        f"[{self.log_name}][Validation] class {class_log_name} has subject '{class_subject['name']}' with hours term '{hours_term}' -> subject will be removed from class")
                     class_subjects_to_remove.append(class_subject)
                     continue
 
                 if hours_term <= 0:
-                    Logger.warn(f"[{self.log_name}][Validation] class {class_log_name} has subject '{class_subject['name']}' with hours term '{hours_term}' -> subject will be removed from class")
+                    Logger.warn(
+                        f"[{self.log_name}][Validation] class {class_log_name} has subject '{class_subject['name']}' with hours term '{hours_term}' -> subject will be removed from class")
                     class_subjects_to_remove.append(class_subject)
                     continue
 
                 if len(subject_teacher_objs) == 0:
-                    Logger.warn(f"[{self.log_name}][Validation] class {class_log_name} subject '{class_subject['name']}' has no teachers assigned --> subject will be removed from class")
+                    Logger.warn(
+                        f"[{self.log_name}][Validation] class {class_log_name} subject '{class_subject['name']}' has no teachers assigned --> subject will be removed from class")
                     class_subjects_to_remove.append(class_subject)
                     # error_count += 1
                     continue
@@ -1260,29 +1253,33 @@ class ExcelExtractorGesamtuebersicht:
                     teacher_hours = subject_teacher["hours"]
 
                     if teacher_key not in all_teachers_dict:
-                        print(
-                            f"error: subject '{class_subject['name']}' of class '{class_obj['name_single_line']}' has unknown teacher key '{teacher_key}' assigned")
-                        class_subjects_to_remove.append(class_subject)
+                        Logger.error(
+                            f"[{self.log_name}][Validation] class {class_log_name} subject '{class_subject['name']}'  has unknown teacher key '{teacher_key}' assigned --> teacher will be removed from subject")
+                        # class_subjects_to_remove.append(class_subject)
+                        teachers_to_remove.append(subject_teacher)
                         error_count += 1
                         continue
+
+                for subject_teacher in teachers_to_remove:
+                    class_subject["teachers_with_hours"].remove(subject_teacher)
 
             for class_subject in class_subjects_to_remove:
                 class_obj["subjects"].remove(class_subject)
 
             if len(class_obj["subjects"]) == 0:
-                print(
-                    f"warning: class '{class_obj['name_single_line']}' has no subjects left after validation -> will not be processed")
+                Logger.warn(f"class {class_log_name} has no subjects left after validation -> will not be processed")
                 classes_to_remove.append(class_obj)
                 continue
 
         for class_obj in classes_to_remove:
+            class_log_name = f"'{class_obj['key']}' ({class_obj['name_full']})"
             all_classes.remove(class_obj)
-            print(
-                f"warning: class '{class_obj['name_single_line']}' has no subjects left after validation -> class will not be processed")
+            Logger.warn(f"class {class_log_name} has no subjects left after validation -> class will not be processed")
 
         used_teachers = set()
         teachers_to_remove = []
 
+        # check if every teacher has a subject in any class
         for class_obj in all_classes:
             class_key = class_obj['key']
             subjects_info = class_obj["subjects"]
@@ -1299,8 +1296,7 @@ class ExcelExtractorGesamtuebersicht:
         for teacher_obj in all_teachers_list:
             teacher_key = teacher_obj["key"]
             if teacher_key not in used_teachers:
-                print(
-                    f"warning: teacher '{teacher_key}' [{teacher_obj['teacher_full_name']}] not used in any class -> teacher will be ignored")
+                Logger.warn(f"warning: teacher {Logger.get_teacher_full(teacher_obj)} not used in any class -> teacher will be removed/ignored in plan")
                 teachers_to_remove.append(teacher_obj)
 
         for teacher_obj in teachers_to_remove:
@@ -1309,10 +1305,8 @@ class ExcelExtractorGesamtuebersicht:
             del all_teachers_dict[teacher_key]
 
         if error_count > 0:
-            print(f"TODO {error_count} errors in teacher availability preferences")
-            # raise Exception(f" {error_count} errors in teacher availability preferences")
-
-        pass
+            # print(f"TODO {error_count} errors in teacher availability preferences")
+            raise Exception(f" {error_count} errors in teacher availability preferences")
 
 
 if __name__ == '__main__':

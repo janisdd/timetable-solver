@@ -2,7 +2,7 @@ from pulp import *
 from tabulate import tabulate
 
 from src.excel_extractor_gesamtuebersicht import ExcelExtractorGesamtuebersicht
-from src.excel_extractor_erfassung import ExcelExtractorStundenerfassung
+from src.excel_extractor_stunden_erfassung import ExcelExtractorStundenerfassung
 
 
 # TODO internship not needed -> set all slots to skip
@@ -518,10 +518,13 @@ excel_extractor = ExcelExtractorGesamtuebersicht(
 )
 excel_extractor.read_all()
 
-# excel_stundenerfassung = ExcelExtractorStundenerfassung(
-#     ['example/Std-erfassung_Erz24A_1. und 2. Sj.xlsx'],
-#     0
-# )
+excel_stundenerfassung = ExcelExtractorStundenerfassung(
+    "example_real/",
+    0
+)
+excel_stundenerfassung.apply_filter_found_files_with_real_classes(excel_extractor.all_classes)
+excel_stundenerfassung.read_all()
+
 #
 # stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)
 # stundenplaner.read_excel_data()

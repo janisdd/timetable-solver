@@ -631,7 +631,7 @@ class ExcelExtractorGesamtuebersicht:
 
             all_classes.append(class_obj)
 
-            if class_obj['name_single_line'] == 'Erzieher ':
+            if class_obj['name_single_line'].strip() == 'Erzieher':
                 Logger.warn(
                     f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' special case because merged cell is wrong ...")
                 # print("TODO 'Erzieher ' ...")

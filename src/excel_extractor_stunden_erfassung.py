@@ -177,6 +177,8 @@ class ExcelExtractorStundenerfassung:
 
         error_count = 0
 
+
+
         while curr_nr_cell.value is not None:
             print(curr_nr_cell.value)
             lfd_nr_value = curr_nr_cell.value
@@ -205,7 +207,7 @@ class ExcelExtractorStundenerfassung:
 
             if len(teacher_with_hours_subject_tuples) == 0:
                 # teacher not found in subjects -> error
-                Logger.error(f"[{self.log_name}][Stundenerfassung] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] not found in class subjects -> PLEASE FIX teacher key at cell: '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}'")
+                Logger.error(f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] not found in class subjects -> PLEASE FIX teacher key at cell: '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}'")
                 error_count += 1
                 pass
             elif len(teacher_with_hours_subject_tuples) == 1:
@@ -218,12 +220,16 @@ class ExcelExtractorStundenerfassung:
                 else:
                     # check if correct, if not -> fix
                     if subject_name_value.strip() != correct_subject_obj['name'].strip():
-                        Logger.warn(f"[{self.log_name}][Stundenerfassung] subject name '{subject_name_value}' does not match the (correct by teacher and class) subject '{correct_subject_obj['name']}' found for teacher key '{teacher_key}' in class '{class_key}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> OVERWRITING FOR YOU")
+                        Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] subject name '{subject_name_value}' does not match the (correct by teacher and class) subject '{correct_subject_obj['name']}' found for teacher key '{teacher_key}' in class '{class_key}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> OVERWRITING FOR YOU")
                         subject_name_cell.value = correct_subject_obj['name']
             else:
                 # teacher has multiple subjects in this class
                 # resort to subject name (if any)
                 if subject_name_value is None:
+
+                    # TODO if the other entries for this teacher e.g. Deu & LF4 are empty for this year index
+                    # we can identify the correct subject because the other subjects have soll (should) 0 in this year index
+
                     # try to extract the teacher and subject from teacher_subject_pair_value value
                     # e.g. Ma(Wind)
                     # if we cannot extract the teacher or subject -> error
@@ -235,7 +241,7 @@ class ExcelExtractorStundenerfassung:
                         possible_subjects.append(_subject_obj['name'])
 
                     Logger.error(
-                        f"[{self.log_name}][Stundenerfassung] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}' -> PLEASE set the correct subject name at cell: '{Logger.get_cell_full_coord(subject_name_cell)}', the choices are: {possible_subjects}")
+                        f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}' -> PLEASE set the correct subject name at cell: '{Logger.get_cell_full_coord(subject_name_cell)}', the choices are: {possible_subjects}")
                     error_count += 1
                 else:
                     # we have a subject here
@@ -286,7 +292,7 @@ class ExcelExtractorStundenerfassung:
         workbook.close()
 
         if error_count > 0:
-            raise Exception(f"{error_count} errors found while reading stundenerfassung for class '{class_key}', see previous error messages for details")
+            raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] {error_count} errors found while reading stundenerfassung for class '{class_key}', see previous error messages for details")
 
         return {
             "class_key": class_key,

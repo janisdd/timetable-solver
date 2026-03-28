@@ -520,10 +520,10 @@ excel_extractor.read_all()
 
 excel_stundenerfassung = ExcelExtractorStundenerfassung(
     "example_real/",
-    1
 )
 excel_stundenerfassung.apply_filter_found_files_with_real_classes(excel_extractor.all_classes)
 excel_stundenerfassung.read_all()
+print("finished")
 
 #
 # stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)

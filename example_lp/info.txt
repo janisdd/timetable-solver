@@ -1,0 +1,31 @@
+
+SOLL deu klasse xyz im HJ
+excel_extractor.all_classes[0]['subjects'][0]['hours_term']
+
+kann von mehreren teachern abgedeckt werden...
+
+
+excel_stundenerfassung.all_soll_data_dict['KP24A.'] list teacher data
+
+[0]['subject_name']
+[0]['soll']
+[0]['ist']
+[0]['teacher_key']
+
+
+SOLL - [0]['ist'] - [1]['ist'] - .... --> missing (mde)
+m_KP24A._Deu
+
+1x sd1, sd2... sind unsere variablen... (möglichen fächer deu für die klasse, egal welcher lehrer)
+
+var_[teacher key]_deutsch_montag_1_slot_1_5a
+
+dann das mit dem möglichst gleich viel für alle lehrere in einem fach für eine klasse?
+danach dann nochmal ohne diff, um restliche aufzuteilen
+
+
+
+
+könnte man nachprüfen, ob alle teacher zsm??
+['teachers_with_hours'][0]['hours']
+['teachers_with_hours'][0]['teacher_key']

@@ -3,12 +3,10 @@ from tabulate import tabulate
 
 from src.excel_extractor_gesamtuebersicht import ExcelExtractorGesamtuebersicht
 from src.excel_extractor_stunden_erfassung import ExcelExtractorStundenerfassung
+from src.logger import Logger
 
 
-# TODO internship not needed -> set all slots to skip
-# TODO teacher_sick_data not needed -> set all slots to skip
-# fixed_teacher_subjects_for_class not needed because we have a white list for a class which teachers are allowed for which subject
-# teacher_fixed_data is not needed because stored in 'PLAN' sheet in excel table
+# TODO blocks (2 slots) is respected in existing teacher's timetables & existing class's timetables?
 
 class StundenplanHelper:
     # the lp problem
@@ -21,6 +19,7 @@ class StundenplanHelper:
     all_class_timetables_tuples = None
 
     def __init__(self, excel_extractor, excel_stundenerfassung):
+        self.log_name = "StundenplanHelper"
         self.excel_extractor = excel_extractor
         self.excel_stundenerfassung = excel_stundenerfassung
 
@@ -57,41 +56,55 @@ class StundenplanHelper:
     def setup_fixed_vars(self):
         print('setup_fixed_vars')
         # some vars are fixed/known
-        # - some classes slots should be skipped -> set all corresponding vars to 0 (see 'PLAN' sheet)
+        # - some classes slots/days should be skipped -> set all corresponding vars to 0 (see 'PLAN' sheet)
+        #   (ignored days just set all slots to ignored)
         # - some classes slots are already filled -> set all corresponding vars to 0 (see 'PLAN' sheet) # TODO 0 -> not set
         # - some teachers have white/black lists for slots
         #   - convert all to black list (so we can set vars to 0) (because 1 would mean we know the solution)
 
+        Logger.log(f"[{self.log_name}][FIXED Setup] setting up fixed variables based on pre-filled values and skip flag")
+
         c_count = 0
         for class_obj in self.excel_extractor.all_classes:
             # one list for each day
-            table_dates = class_obj['table_dates'][1]
+            table_dates = class_obj['table_dates']
             class_key = class_obj['key']
 
-            for day_index, table_info_list in enumerate(table_dates):
+            # [0] are just the heads (dates), [2] is the start coord (start_col, start_row)
+            table_body = table_dates[1]
+
+            for day_index, table_info_list in enumerate(table_body):
                 for slot_index, info_obj in enumerate(table_info_list):
                     filled_value = info_obj['entry']  # e.g. LF5(Gru) -> teacher already teachers subject here
                     ignore = info_obj['ignore']
 
-                    should_not_process = (filled_value != '' and filled_value is not None) or ignore == True
+                    should_not_process = (filled_value is not None and filled_value != '') or ignore == True
 
                     if should_not_process:
                         var_names = get_all_vars_with_preset(self.all_var_names, class_key=class_key,
                                                              day_index=day_index, slot_index=slot_index)
 
-                        print(f"skip prefilled slot {day_index}, {slot_index} for class {class_key} (prefilled value: {filled_value})")
+                        # for a prefilled value, we just set our variable to 0, so that we don't place something else there
+                        if ignore:
+                            Logger.log(
+                                f"[{self.log_name}][FIXED Setup] skipping day '{day_index}', slot '{slot_index}' for class '{class_key}' because of ignore flag (prefilled value: {filled_value})")
+                        else:
+                            Logger.log(
+                                f"[{self.log_name}][FIXED Setup] skipping day '{day_index}', slot '{slot_index}' for class '{class_key}' because of non-empty prefilled value: {filled_value}")
 
                         if len(var_names) == 0:
-                            print("")
+                            print("TODO TODO")
 
                         var = [self.all_vars[var_name] for var_name in var_names]
                         # self.problem += lpSum(var) == 0, f"skip prefilled slots in plan {var_names}, {day_index}, {slot_index}"
                         self.problem += lpSum(
-                            var) == 0, f"skip prefilled slots in plan, {day_index}, {slot_index} {c_count}"
+                            var) == 0, f"skip prefilled/skipped slots in plan, {day_index}, {slot_index} {c_count}"
                         c_count += 1
 
+
+        Logger.log(f"[{self.log_name}][FIXED Setup] setting up fixed variables based on teachers' availability preferences")
+
         c_count = 0
-        # TODO set prefilled to 1?
         for i, teacher_obj in enumerate(self.excel_extractor.all_teachers_list):
             teacher_key = teacher_obj["key"]
             availability_preference_table = teacher_obj['availability_preference_table']
@@ -100,16 +113,20 @@ class StundenplanHelper:
                 for slot_index, slot_obj in enumerate(day_slots_list):
                     class_key = slot_obj['class_key']
                     allowed = slot_obj['allowed']
+                    has_fixed_class = class_key is not None
 
-                    if not allowed:
+                    if not allowed or has_fixed_class:
                         # teacher has some fixed class in this slot...
+                        # not allowed -> blacklisted, teach cannot do any subject in this slot
+                        # for us that just means, set all related vars to 0, so we don't place anything else there
+
                         var_names = get_all_vars_with_preset(self.all_var_names, teacher_key=teacher_key,
                                                              day_index=day_index, slot_index=slot_index)
 
-                        # print(f"skip fixed teacher slots {day_index}, {slot_index} for teacher {teacher_key} (class: {class_key})")
+                        Logger.log(f"[{self.log_name}][FIXED Setup] skip fixed teacher day '{day_index}', slots '{slot_index}' for teacher '{teacher_key}' because blacklist (class: '{class_key}')")
 
                         if len(var_names) == 0:
-                            print("")
+                            print("TODO TODO")
 
                         var = [self.all_vars[var_name] for var_name in var_names]
                         # self.problem += lpSum(var) == 0, f"skip fixed teacher slots {var_names}, {day_index}, {slot_index}"
@@ -118,16 +135,17 @@ class StundenplanHelper:
                         c_count += 1
 
                         # because of this, the class has no other option too
+                        # make sure we don't set the class to some other subject on that slot
 
-                        if class_key is not None:
+                        if has_fixed_class:
                             var_names_class = get_all_vars_with_preset(self.all_var_names, class_key=class_key,
                                                                        day_index=day_index, slot_index=slot_index)
 
-                            print(
-                                f"skip fixed class slots day {day_index}, slot {slot_index} class: {class_key} (teacher {teacher_key})")
+                            Logger.log(
+                                f"[{self.log_name}][FIXED Setup] skip fixed class day '{day_index}', slot '{slot_index}' class: '{class_key}' because prefilled class (teacher '{teacher_key}')")
 
                             if len(var_names_class) == 0:
-                                print("")
+                                print("TODO TODO")
 
                             var_class = [self.all_vars[var_name] for var_name in var_names_class]
                             # self.problem += lpSum(var_class) == 0, f"skip teacher slots for classes {var_names_class}, {day_index}, {slot_index} {c_count}"
@@ -136,14 +154,13 @@ class StundenplanHelper:
                             c_count += 1
 
     def setup_constraints(self):
-        print('setup_constraints')
 
         # every day can only have the max number of slots for one class
-        # monday-1 has max 4 slots, so 5a can only have 4 slts (and any other class too)
+        # monday-1 has max 4 slots, so 5a can only have 4 slots (and any other class too)
         # [teacher]_[subject]_montag-1_slot_1_5a + ... <= 4
         c_count = 0
 
-        print(f"CONSTRAINT: max slots per day: {self.max_slots_per_day}")
+        Logger.log(f"[{self.log_name}][Constraint Setup]: max slots per day: {self.max_slots_per_day}")
         for day_index in range(self.max_days):
             for class_obj in self.excel_extractor.all_classes:
                 class_key = class_obj['key']
@@ -158,7 +175,7 @@ class StundenplanHelper:
         # day 4 slots -> teacher can only teacher 4
         # l1_[subject]_montag-1_1_[class] + ... <= 4
         c_count = 0
-        print(f"CONSTRAINT: max slots per teacher per day")
+        Logger.log(f"[{self.log_name}][Constraint Setup]: max slots per teacher per day")
         for day_index in range(self.max_days):
             for teacher_obj in self.excel_extractor.all_teachers_list:
                 teacher_key = teacher_obj["key"]
@@ -169,11 +186,11 @@ class StundenplanHelper:
                 c_count += 1
                 self.problem += c1
 
-        # a teacher can only teach max one subject per class at one slot
+        # one teacher can only teach max one subject per (any) class at one slot
         # e.g. l1 can only teach deutsch to 5a at montag-1 in slot 1 (but not to 5b in the same slot)
         # l1_[subject]_montag-1_1_[class] + ... = 1
         c_count = 0
-        print(f"CONSTRAINT: max one subject per class at one slot")
+        Logger.log(f"[{self.log_name}][Constraint Setup]: max one subject per class at one slot")
         for teacher_obj in self.excel_extractor.all_teachers_list:
             teacher_key = teacher_obj["key"]
             for day_index in range(self.max_days):
@@ -186,11 +203,11 @@ class StundenplanHelper:
                     c_count += 1
                     self.problem += c1
 
-        # every class can only have one subject with one teacher at a specific slot
+        # every class can only have one subject with one (any) teacher at a specific slot
         # e.g. 5a at montag-1 in slot 1 can only have l1 teaching deutsch
         # [teacher]_[subject]_montag-1_1_5a + ... = 1
         c_count = 0
-        print(f"CONSTRAINT: every class can only have one subject with one teacher at a specific slot")
+        Logger.log(f"[{self.log_name}][Constraint Setup]: every class can only have one subject with one teacher at a specific slot")
         for class_obj in self.excel_extractor.all_classes:
             class_key = class_obj['key']
             for day_index in range(self.max_days):
@@ -202,6 +219,75 @@ class StundenplanHelper:
                         var) <= 1, f"every class can only have one subject with one teacher at a specific slot {c_count}"
                     c_count += 1
                     self.problem += c1
+
+    def solve_timetable_problem_2(self):
+
+        c_count = 0
+        all_rest_varialbes = []
+        for class_obj in self.excel_extractor.all_classes:
+            class_key = class_obj['key']
+            subjects_info = class_obj["subjects"]
+            for subject_info in subjects_info:
+                subject_name = subject_info["name"]
+
+                # SOLL for the subject e.g. 80
+                SOLL_hours_term = subject_info["hours_term"]
+                # this is our 'mde' (missing deu)
+                MISSING_hours_term = SOLL_hours_term
+
+                Logger.log(f"[{self.log_name}][OBJ]: class '{class_key}' needs '{SOLL_hours_term}' times subject '{subject_name}'")
+
+                IST_hours = 0
+                # check all connected teachers
+                for teacher_tracking_hours_obj in self.excel_stundenerfassung.all_soll_data_dict[class_key]:
+                    tracking_subject_name = teacher_tracking_hours_obj['subject_name']
+                    if subject_name == tracking_subject_name:
+                        teacher_key = teacher_tracking_hours_obj['teacher_key']
+                        hours_ist = teacher_tracking_hours_obj['ist']
+                        hours_soll = teacher_tracking_hours_obj['soll']
+
+                        MISSING_hours_term -= hours_ist
+                        IST_hours += hours_soll
+
+                        Logger.log(
+                            f"[{self.log_name}][OBJ]:teacher key '{teacher_key}' has IST hours '{hours_ist}' and SOLL hours '{hours_soll}' --> new class SOLL is '{MISSING_hours_term}'")
+
+                Logger.log(
+                    f"[{self.log_name}][OBJ]: class '{class_key}' needs misses '{MISSING_hours_term}' times subject '{subject_name}' ({IST_hours}/{SOLL_hours_term})")
+
+                var_names = get_all_vars_with_preset(self.all_var_names, class_key=class_key, subject_key=subject_name)
+                var = [-self.all_vars[var_name] for var_name in var_names]
+
+                # slack variable for how many ours are still to be filled
+                # mde - sd1 - sd2 - sd3 - rde >= 0;
+                # mde - sd1 - sd2 - sd3 - rde <= 0;
+                # sd1, sd2, ... , are our vars, rde is the new var
+                rde = pulp.LpVariable(f"r_{class_key}_{subject_name}", lowBound=0)
+
+                constraint1 = MISSING_hours_term + lpSum(var) - rde >= 0
+                constraint2 = MISSING_hours_term + lpSum(var) - rde <= 0
+                self.problem += constraint1, f"res variable for '{class_key}', subject '{subject_name}' >= 0, {c_count}"
+                c_count += 1
+                self.problem += constraint2, f"res variable for '{class_key}', subject '{subject_name}' <= 0, {c_count}"
+                c_count += 1
+
+                all_rest_varialbes.append(rde)
+
+        self.problem += lpSum(all_rest_varialbes)
+        self.problem.solve()
+
+        # The status of the solution is printed to the screen
+        print("Status:", LpStatus[self.problem.status])
+
+        if self.problem.status != 1:
+            print("No solution found")
+            exit()
+
+        # Each of the variables is printed with it's resolved optimum value
+        for v in self.problem.variables():
+            if v.varValue == 1:
+                print(v.name, "=", v.varValue)
+
 
     def solve_timetable_problem(self):
 
@@ -526,12 +612,13 @@ excel_stundenerfassung.read_all()
 print("finished")
 
 #
-# stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)
+stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)
 # stundenplaner.read_excel_data()
 # stundenplaner.read_excel_stundenerfassung()
 # stundenplaner.prepare_excel_data()
-# stundenplaner.init_new_timetable_problem()
-# stundenplaner.setup_fixed_vars()
-# stundenplaner.setup_constraints()
+stundenplaner.init_new_timetable_problem()
+stundenplaner.setup_fixed_vars()
+stundenplaner.setup_constraints()
 # stundenplaner.solve_timetable_problem()
+stundenplaner.solve_timetable_problem_2()
 # stundenplaner.write_timetable_solution_to_excel('example/07_KW 45_03.11.-07.11.2025_OUT.xlsm')

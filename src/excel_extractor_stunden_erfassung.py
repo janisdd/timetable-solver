@@ -172,6 +172,9 @@ class ExcelExtractorStundenerfassung:
         need_to_save_wb = False
         need_to_log_all_teacher_names_in_class = False
 
+        # in case there are multiple entries for the same teacher and subject --> error
+        used_teacher_subject_pairs = set()
+
         for curr_year_index in range(len(YEAR_COLUMN_INDICES)-1, -1, -1):
             curr_soll_data_array = []
             # we need to determine the correct year index
@@ -215,6 +218,7 @@ class ExcelExtractorStundenerfassung:
                 if soll_value is None or soll_value == "" or soll_value == 0:
                     continue
 
+                # only log once
                 if not found_correct_year_index:
                     Logger.log(
                         f"[{self.log_name}][Stundenerfassung][{class_key}] --- found correct year column index: {curr_year_index} (column {soll_cell.column_letter} [index {self.year_columns[correct_year_index]}])")
@@ -231,12 +235,19 @@ class ExcelExtractorStundenerfassung:
                 subject_name_cell = ws.cell(row=curr_row, column=subject_col)
                 subject_name_value = subject_name_cell.value
 
+                if subject_name_value is not None and type(subject_name_value) != str:
+                    raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] subject name must be a string, cell: {Logger.get_cell_full_coord(subject_name_cell)}, value: {subject_name_value}")
+
                 # try to extract the teacher from teacher_subject_pair_value value
                 # e.g. Ma(Wind)
                 teacher_start = teacher_subject_pair_value.find("(")
                 teacher_end = teacher_subject_pair_value.rfind(")")
                 teacher_key = teacher_subject_pair_value[teacher_start+1:teacher_end]
                 maybe_subject_name = teacher_subject_pair_value[:teacher_start].strip()
+
+                if type(teacher_key) != str:
+                    raise Exception(
+                        f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key must be a string (in teacher + subject cell), cell: {Logger.get_cell_full_coord(teacher_subject_pair_cell)}, value: {teacher_subject_pair_value}")
 
                 # teacher can have multiple subjects in this class
                 teacher_with_hours_subject_tuples = find_teacher_in_class_subjects(teacher_key, class_obj)
@@ -245,7 +256,7 @@ class ExcelExtractorStundenerfassung:
 
                 if len(teacher_with_hours_subject_tuples) == 0:
                     # teacher not found in subjects -> error
-                    Logger.error(f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] not found in class subjects -> PLEASE FIX teacher key at cell: '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}'")
+                    Logger.error(f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] not found in class subjects -> PLEASE FIX teacher key at cell: '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}', IGNORING TEACHER")
                     need_to_log_all_teacher_names_in_class = True
                     error_count += 1
                     continue
@@ -265,6 +276,8 @@ class ExcelExtractorStundenerfassung:
                             Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] subject name '{subject_name_value}' does not match the (correct by teacher and class) subject '{correct_subject_obj['name']}' found for teacher key '{teacher_key}' in class '{class_key}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> OVERWRITING FOR YOU")
                             subject_name_cell.value = correct_subject_obj['name']
                             need_to_save_wb = True
+
+                    Logger.log(f"[{self.log_name}][Stundenerfassung][{class_key}] found correct teacher key '{teacher_key}' with subject '{correct_subject_obj['name']}' for teacher + subject pair value '{teacher_subject_pair_value}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' (from overview table this class has only this teacher for this subject)  -> using this subject")
                 else:
                     # teacher has multiple subjects in this class
                     # resort to subject name (if any)
@@ -292,6 +305,12 @@ class ExcelExtractorStundenerfassung:
                                 # need_to_save_wb = True
                                 correct_subject_obj = _subject_obj
                                 subject_name_value = correct_subject_obj['name'].strip()
+
+                                # subject comes from the overview for each class -> subjecr should be correct here
+                                # if type(subject_name_value) != str:
+                                #     raise Exception(
+                                #         f"[{self.log_name}][Stundenerfassung][{class_key}] subject name must be a string, cell: {Logger.get_cell_full_coord(subject_name_cell)}, value: {subject_name_value}")
+
                                 Logger.debug(f"[{self.log_name}][Stundenerfassung][{class_key}] found possible subject '{subject_name_value}' for teacher key '{teacher_key}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' based on the name in the teacher subject pair value '{teacher_subject_pair_value}' -> using this subject")
                                 found_correct_subject_obj = True
 
@@ -338,6 +357,18 @@ class ExcelExtractorStundenerfassung:
                 if subject_name_value is None:
                     Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'subject name' is None for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(subject_name_cell)}' -> ignoring this entry")
                     continue
+
+                # these should already be strings...
+                teacher_subject_pair = (str(teacher_key),str(subject_name_value))
+                if teacher_subject_pair in used_teacher_subject_pairs:
+                    # TODO ENABLE?
+                    # raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] duplicate entry for teacher key '{teacher_key}' and subject '{subject_name_value}' found in excel sheet at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> this should not happen, please fix the excel sheet, there should be only one entry for each teacher and subject combination")
+                    Logger.error(
+                        f"[{self.log_name}][Stundenerfassung][{class_key}] duplicate entry for teacher key '{teacher_key}' and subject '{subject_name_value}' found in excel sheet at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> this should not happen, please fix the excel sheet, there should be only one entry for each teacher and subject combination, IGNORING ENTRY")
+                    error_count += 1
+                    continue
+
+                used_teacher_subject_pairs.add(teacher_subject_pair)
 
                 soll_info = {
                     "lfd_nr": lfd_nr_value,

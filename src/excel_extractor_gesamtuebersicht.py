@@ -481,6 +481,8 @@ class ExcelExtractorGesamtuebersicht:
         if output_file_path.endswith(".xlsm"):
             output_file_path = output_file_path[:-5] + ".xlsx"
 
+        Logger.log(f"[{self.log_name}] writing timetable solution to excel file {output_file_path} ...")
+
         # create copy of file
         # shutil.copyfile(source_file, output_file_path)
 
@@ -490,7 +492,9 @@ class ExcelExtractorGesamtuebersicht:
 
         for timetable_solutions_tuple in timetable_solution_tuples_for_classes_with_at_least_one_lesson:
             class_obj = timetable_solutions_tuple[0]
-            print(f"writing timetable solution for class '{class_obj['key']}' ('{class_obj['name_single_line']}')")
+            Logger.log(f"[{self.log_name}] writing timetable solution for class '{class_obj['key']}' ('{class_obj['name_single_line']}')")
+
+            # [class_obj, class_timetable, table_start_coord_tuple]
             timetable_solution_dict = timetable_solutions_tuple[1]
             table_start_coord_tuple = timetable_solutions_tuple[2]
 
@@ -506,8 +510,18 @@ class ExcelExtractorGesamtuebersicht:
                     if timetable_solution_entry is None:
                         continue
                     # row + 1 are the dates
+                    slot_index_multiplier = 1
+                    if ONLY_USE_BLOCKS_OF_TWO:
+                        slot_index_multiplier = 2
+
+                    # +1 col because class name (and times col)
+                    # +2 row because day and date row
                     plan_cell = ws_plan_out.cell(column=class_key_col_in_plan + 1 + day_index,
-                                                 row=class_key_row_in_plan + 2 + slot_index)
+                                                 row=class_key_row_in_plan + 2 + (slot_index * slot_index_multiplier))
+
+                    next_cell = ws_plan_out.cell(column=class_key_col_in_plan + 1 + day_index,
+                                                 row=class_key_row_in_plan + 2 + (slot_index * slot_index_multiplier) + 1)
+
                     teacher_key = timetable_solution_entry['teacher_key']
                     subject_key = timetable_solution_entry['subject_key']
                     class_key = timetable_solution_entry['class_key']
@@ -517,13 +531,15 @@ class ExcelExtractorGesamtuebersicht:
                         solution_value = f"{self.subject_name_to_key_dict[subject_key]}({teacher_key})"
                     else:
                         solution_value = f"{subject_key}({teacher_key})"
-                        print(
-                            f"warning: subject key '{subject_key}' not found in subject name to key dict -> using as is")
+                        Logger.warn(f"[{self.log_name}] subject_key '{subject_key}' not found in subject name to key dict (see excel file '{self.excel_file_mappings}') -> using '{subject_key}' as subject")
 
                     plan_cell.value = solution_value
 
+                    if ONLY_USE_BLOCKS_OF_TWO:
+                        next_cell.value = solution_value
+
         wb_plan_output.save(output_file_path)
-        # wb_plan_output.close()
+        wb_plan_output.close()
 
     def get_excel_rect_data_as_array(self, ws, min_row, max_row, min_col, max_col):
         array = []

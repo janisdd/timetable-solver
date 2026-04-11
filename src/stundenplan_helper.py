@@ -165,6 +165,10 @@ class StundenplanHelper:
             for class_obj in self.excel_extractor.all_classes:
                 class_key = class_obj['key']
                 var_names = get_all_vars_with_preset(self.all_var_names, day_index=day_index, class_key=class_key)
+
+                if len(var_names) == 0:
+                    print("TODO TODO")
+
                 var = [self.all_vars[var_name] for var_name in var_names]
                 c1 = lpSum(
                     var) <= self.max_slots_per_day, f"every day can only have a max number of slots for one class {c_count}"
@@ -180,6 +184,10 @@ class StundenplanHelper:
             for teacher_obj in self.excel_extractor.all_teachers_list:
                 teacher_key = teacher_obj["key"]
                 var_names = get_all_vars_with_preset(self.all_var_names, teacher_key=teacher_key, day_index=day_index)
+
+                if len(var_names) == 0:
+                    print("TODO TODO")
+
                 var = [self.all_vars[var_name] for var_name in var_names]
                 c1 = lpSum(
                     var) <= self.max_slots_per_day, f"every teacher can only teach the max number of slots per day {c_count}"
@@ -198,6 +206,10 @@ class StundenplanHelper:
                     var_names = get_all_vars_with_preset(self.all_var_names, teacher_key=teacher_key,
                                                          slot_index=slot_index,
                                                          day_index=day_index)
+
+                    if len(var_names) == 0:
+                        print("TODO TODO")
+
                     var = [self.all_vars[var_name] for var_name in var_names]
                     c1 = lpSum(var) <= 1, f"teacher can only teach max one subject per class at one slot {c_count}"
                     c_count += 1
@@ -224,6 +236,8 @@ class StundenplanHelper:
 
         c_count = 0
         all_rest_varialbes = []
+        all_rest_varialbes_infos = []
+        big_sum_SOLL_hours_term = 0
         for class_obj in self.excel_extractor.all_classes:
             class_key = class_obj['key']
             subjects_info = class_obj["subjects"]
@@ -235,9 +249,10 @@ class StundenplanHelper:
                 # this is our 'mde' (missing deu)
                 MISSING_hours_term = SOLL_hours_term
 
-                Logger.log(f"[{self.log_name}][OBJ]: class '{class_key}' needs '{SOLL_hours_term}' times subject '{subject_name}'")
+                Logger.log(f"[{self.log_name}][OBJ] class '{class_key}' needs '{SOLL_hours_term}' times subject '{subject_name}'")
 
-                IST_hours = 0
+                sum_IST_hours_teacher = 0
+                sum_SOLL_hours_term_teachers = 0
                 # check all connected teachers
                 for teacher_tracking_hours_obj in self.excel_stundenerfassung.all_soll_data_dict[class_key]:
                     tracking_subject_name = teacher_tracking_hours_obj['subject_name']
@@ -246,14 +261,29 @@ class StundenplanHelper:
                         hours_ist = teacher_tracking_hours_obj['ist']
                         hours_soll = teacher_tracking_hours_obj['soll']
 
-                        MISSING_hours_term -= hours_ist
-                        IST_hours += hours_soll
+                        sum_SOLL_hours_term_teachers += hours_soll
+                        sum_IST_hours_teacher += hours_ist
 
-                        Logger.log(
-                            f"[{self.log_name}][OBJ]:teacher key '{teacher_key}' has IST hours '{hours_ist}' and SOLL hours '{hours_soll}' --> new class SOLL is '{MISSING_hours_term}'")
+                        Logger.debug(
+                            f"[{self.log_name}][OBJ] teacher key '{teacher_key}' has IST hours '{hours_ist}' and SOLL hours '{hours_soll}'")
 
-                Logger.log(
-                    f"[{self.log_name}][OBJ]: class '{class_key}' needs misses '{MISSING_hours_term}' times subject '{subject_name}' ({IST_hours}/{SOLL_hours_term})")
+                if sum_SOLL_hours_term_teachers != SOLL_hours_term:
+                    Logger.warn(
+                        f"[{self.log_name}][OBJ] class '{class_key}' subject '{subject_name}' has SOLL hours term '{SOLL_hours_term}' but sum of SOLL hours from teachers is '{sum_SOLL_hours_term_teachers}', using teachers' SOLL hours '{sum_SOLL_hours_term_teachers}'!")
+                    SOLL_hours_term = sum_SOLL_hours_term_teachers
+
+                MISSING_hours_term = SOLL_hours_term - sum_IST_hours_teacher
+                needs_hours = MISSING_hours_term > 0
+
+                big_sum_SOLL_hours_term += SOLL_hours_term
+
+                if needs_hours:
+                    Logger.log(
+                        f"[{self.log_name}][OBJ] class '{class_key}' misses '{MISSING_hours_term}' times subject '{subject_name}' ({sum_IST_hours_teacher}/{SOLL_hours_term})")
+                else:
+                    Logger.log(
+                        f"[{self.log_name}][OBJ] class '{class_key}' has '{-MISSING_hours_term}' times subject '{subject_name}' TOO MUCH ({sum_IST_hours_teacher}/{SOLL_hours_term}), ignoring subject for that class")
+                    continue
 
                 var_names = get_all_vars_with_preset(self.all_var_names, class_key=class_key, subject_key=subject_name)
                 var = [-self.all_vars[var_name] for var_name in var_names]
@@ -264,6 +294,7 @@ class StundenplanHelper:
                 # sd1, sd2, ... , are our vars, rde is the new var
                 rde = pulp.LpVariable(f"r_{class_key}_{subject_name}", lowBound=0)
 
+                # this is the same as ... == 0
                 constraint1 = MISSING_hours_term + lpSum(var) - rde >= 0
                 constraint2 = MISSING_hours_term + lpSum(var) - rde <= 0
                 self.problem += constraint1, f"res variable for '{class_key}', subject '{subject_name}' >= 0, {c_count}"
@@ -272,12 +303,75 @@ class StundenplanHelper:
                 c_count += 1
 
                 all_rest_varialbes.append(rde)
+                all_rest_varialbes_infos.append([class_key, subject_name, rde])
 
-        self.problem += lpSum(all_rest_varialbes)
+        # every r_ represents the new missing hours (the hours we are still missing with the new solution)
+        # we try to minimize the sum of them, so every difference var should be enough on its own to overrule them
+        safe_diff_var_multiplier = big_sum_SOLL_hours_term + 1
+
+        # add all abs difference varialbes
+        # e.g. deu, eng -> r_deu, r_eng
+        # bd_deu_eng + r_deu - r_eng >= 0
+        # bd_deu_eng - r_deu + r_eng >= 0
+
+        # bd_deu_eng  >= r_eng - r_deu
+        # bd_deu_eng  >= r_deu - r_eng
+
+        # e.g. r_deu = 4, r_eng = 2 --> bd_deu_eng = 2 (this always gives us the difference)
+        # now do that for all combinations...
+        all_diff_vars = []
+        all_diff_constraint_names = []
+        c_count = 0
+        for i in range(len(all_rest_varialbes_infos)):
+            for j in range(i+1, len(all_rest_varialbes_infos)):
+                deu_info = all_rest_varialbes_infos[i]
+                eng_info = all_rest_varialbes_infos[j]
+
+                deu_class = deu_info[0]
+                deu_subj = deu_info[1]
+                r_deu = deu_info[2]
+
+                eng_class = eng_info[0]
+                eng_subj = eng_info[1]
+                r_eng = eng_info[2]
+
+                bd_deu_eng = pulp.LpVariable(f"bd_{deu_class}_{deu_subj}_{eng_class}_{eng_subj}", lowBound=0)
+                all_diff_vars.append(bd_deu_eng * safe_diff_var_multiplier)
+
+                diff_constraint_1 = bd_deu_eng + r_deu - r_eng >= 0
+                diff_constraint_2 = bd_deu_eng - r_deu + r_eng >= 0
+                # names can get too long and are then truncated...
+                # name_1 = f"difference for class '{deu_class}', subject '{deu_subj}' with class {eng_class}, subject {eng_subj}, {c_count}"
+                name_1 = f"difference for class constraint, {c_count}"
+                self.problem += diff_constraint_1, name_1
+                c_count += 1
+                # name_2 = f"difference for class '{deu_class}', subject '{deu_subj}' with class {eng_class}, subject {eng_subj}, {c_count}"
+                name_2 = f"difference for class constraint, {c_count}"
+                self.problem += diff_constraint_2, name_2
+                c_count += 1
+
+                all_diff_constraint_names.append(name_1.replace(" ", "_"))
+                all_diff_constraint_names.append(name_2.replace(" ", "_"))
+
+
+        self.problem += lpSum(all_rest_varialbes) + lpSum(all_diff_vars)
         self.problem.solve()
 
         # The status of the solution is printed to the screen
         print("Status:", LpStatus[self.problem.status])
+
+        # because we try to minimize the differences
+        #   it can happen that we don't proceed further because the missing values are the same
+        #   then reducing it further would make the obj value worse again
+        # so, a second run to place entries after that should work to fill the missing gaps 
+
+        # for constraint_name in all_diff_constraint_names:
+        #     del self.problem.constraints[constraint_name]
+        #
+        # self.problem.solve()
+
+        # The status of the solution is printed to the screen
+        # print("Status:", LpStatus[self.problem.status])
 
         if self.problem.status != 1:
             print("No solution found")
@@ -285,8 +379,15 @@ class StundenplanHelper:
 
         # Each of the variables is printed with it's resolved optimum value
         for v in self.problem.variables():
-            if v.varValue == 1:
+            if v.name.startswith("r_"):
                 print(v.name, "=", v.varValue)
+            if v.name.startswith("var") and v.varValue == 1:
+                print(v.name, "=", v.varValue)
+
+        print("---------------")
+
+        all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
+        self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT.xlsm')
 
 
     def solve_timetable_problem(self):
@@ -395,9 +496,9 @@ class StundenplanHelper:
         self.all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
 
     # clone the file with PLAN
-    def write_timetable_solution_to_excel(self, output_file_path):
+    def write_timetable_solution_to_excel(self, all_class_timetables_tuples, output_file_path):
         print(f"writing timetable solution to excel file: {output_file_path}")
-        self.excel_extractor.write_timetable_solution_to_excel_impl(output_file_path, self.all_class_timetables_tuples)
+        self.excel_extractor.write_timetable_solution_to_excel_impl(output_file_path, all_class_timetables_tuples)
 
 def get_slack_var_parts__teacher_offered_lessons_total(var_name):
     var_parts = var_name.split("_")
@@ -529,7 +630,7 @@ def print_timetable(class_obj, stundenplan, stundenplanHelper, at_least_one_less
         table_header.append(day_index)
         for lesson_hour_0, lesson_obj in enumerate(lessons_list):
             if lesson_obj is not None:
-                table_body[lesson_hour_0][day_index + 1] = f"{lesson_obj['subject_key']}/{lesson_obj['teacher_key']}"
+                table_body[lesson_hour_0][day_index + 1] = f"'{lesson_obj['subject_key']}' [{lesson_obj['teacher_key']}]"
 
     data.append(table_header)
     data.extend(table_body)
@@ -540,6 +641,12 @@ def print_timetable(class_obj, stundenplan, stundenplanHelper, at_least_one_less
         print("Keine Lehrveranstaltungen gefunden.")
     print()
 
+def is_real_var(var):
+    return var.name.startswith("var_")
+
+def is_slack_var(var):
+    return var.name.startswith("r_")
+
 def get_stundenplan_tuples_from_vars(stundenplanHelper):
     # we need a timetable for each teacher
     # we need a timetable for each class
@@ -547,7 +654,11 @@ def get_stundenplan_tuples_from_vars(stundenplanHelper):
     all_class_timetables = []
     solution_variables_obj = []
 
+    # for some reason var_name expluced the
     for var_name, var in stundenplanHelper.all_vars.items():
+        if not is_real_var(var):
+            continue
+
         if var.varValue == 1:
             parts = _get_var_parts_obj(var_name)
             solution_variables_obj.append(parts)
@@ -561,6 +672,7 @@ def get_stundenplan_tuples_from_vars(stundenplanHelper):
         class_key = class_obj['key']
         table_start_coord_tuple = class_obj['table_dates'][2]
 
+        # one row per day, then all slots in array
         class_timetable = create_empty_timetable(stundenplanHelper.max_days, stundenplanHelper.max_slots_per_day)
         for day_index in range(stundenplanHelper.max_days):
             for slot_index in range(stundenplanHelper.max_slots_per_day):

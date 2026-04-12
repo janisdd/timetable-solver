@@ -1,7 +1,7 @@
 from pulp import *
 from tabulate import tabulate
 
-from src.excel_extractor_gesamtuebersicht import ExcelExtractorGesamtuebersicht
+from src.excel_extractor_gesamtuebersicht import ExcelExtractorGesamtuebersicht, ONLY_USE_BLOCKS_OF_TWO
 from src.excel_extractor_stunden_erfassung import ExcelExtractorStundenerfassung
 from src.logger import Logger
 
@@ -237,6 +237,10 @@ class StundenplanHelper:
         c_count = 0
         all_rest_varialbes = []
         all_rest_varialbes_infos = []
+        # after the solution we want to show what was reduced and how many...
+        stats_for_after_sol = {}
+        vars_name_to_r_var_lookup = {}
+
         big_sum_SOLL_hours_term = 0
         for class_obj in self.excel_extractor.all_classes:
             class_key = class_obj['key']
@@ -286,7 +290,14 @@ class StundenplanHelper:
                     continue
 
                 var_names = get_all_vars_with_preset(self.all_var_names, class_key=class_key, subject_key=subject_name)
-                var = [-self.all_vars[var_name] for var_name in var_names]
+
+                MISSING_hours_term_target = MISSING_hours_term
+
+                if ONLY_USE_BLOCKS_OF_TWO:
+                    MISSING_hours_term_target = MISSING_hours_term_target // 2
+
+                var = [-1 * self.all_vars[var_name] for var_name in var_names]
+                plain_vars = [self.all_vars[var_name] for var_name in var_names]
 
                 # slack variable for how many ours are still to be filled
                 # mde - sd1 - sd2 - sd3 - rde >= 0;
@@ -295,8 +306,8 @@ class StundenplanHelper:
                 rde = pulp.LpVariable(f"r_{class_key}_{subject_name}", lowBound=0)
 
                 # this is the same as ... == 0
-                constraint1 = MISSING_hours_term + lpSum(var) - rde >= 0
-                constraint2 = MISSING_hours_term + lpSum(var) - rde <= 0
+                constraint1 = MISSING_hours_term_target + lpSum(var) - rde >= 0
+                constraint2 = MISSING_hours_term_target + lpSum(var) - rde <= 0
                 self.problem += constraint1, f"res variable for '{class_key}', subject '{subject_name}' >= 0, {c_count}"
                 c_count += 1
                 self.problem += constraint2, f"res variable for '{class_key}', subject '{subject_name}' <= 0, {c_count}"
@@ -304,6 +315,21 @@ class StundenplanHelper:
 
                 all_rest_varialbes.append(rde)
                 all_rest_varialbes_infos.append([class_key, subject_name, rde])
+
+                stats_for_after_sol[rde] = {
+                    "class_key": class_key,
+                    "class_obj": class_obj,
+                    "subject_name": subject_name,
+                    "subject_info": subject_info,
+                    "soll_hours_term": SOLL_hours_term,
+                    "sum_ist_hours_teacher": sum_IST_hours_teacher,
+                    "rde": rde,
+                    "vars": var
+                }
+
+                for plain_var in plain_vars:
+                    # print(plain_var.name)
+                    vars_name_to_r_var_lookup[plain_var] = rde
 
         # every r_ represents the new missing hours (the hours we are still missing with the new solution)
         # we try to minimize the sum of them, so every difference var should be enough on its own to overrule them
@@ -355,7 +381,9 @@ class StundenplanHelper:
 
 
         self.problem += lpSum(all_rest_varialbes) + lpSum(all_diff_vars)
+        Logger.log(f"Starting solver ...")
         self.problem.solve()
+        Logger.log(f"... solver finished")
 
         # The status of the solution is printed to the screen
         print("Status:", LpStatus[self.problem.status])
@@ -363,7 +391,7 @@ class StundenplanHelper:
         # because we try to minimize the differences
         #   it can happen that we don't proceed further because the missing values are the same
         #   then reducing it further would make the obj value worse again
-        # so, a second run to place entries after that should work to fill the missing gaps 
+        # so, a second run to place entries after that should work to fill the missing gaps
 
         # for constraint_name in all_diff_constraint_names:
         #     del self.problem.constraints[constraint_name]
@@ -378,16 +406,77 @@ class StundenplanHelper:
             exit()
 
         # Each of the variables is printed with it's resolved optimum value
-        for v in self.problem.variables():
-            if v.name.startswith("r_"):
-                print(v.name, "=", v.varValue)
-            if v.name.startswith("var") and v.varValue == 1:
-                print(v.name, "=", v.varValue)
+        for var in self.problem.variables():
+            if var.name.startswith("r_"):
+                print(var.name, "=", var.varValue)
+            if var.name.startswith("var") and var.varValue == 1:
+                print(var.name, "=", var.varValue)
 
+        print("---------------")
+        self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup)
         print("---------------")
 
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
-        self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT.xlsm')
+        self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT2.xlsm')
+
+    def print_solution_stats(self, problem, r_var_stats_for_after_sol, vars_to_r_var_lookup):
+        # stats_for_after_sol[rde] = {
+        #     "class_key": class_key,
+        #     "class_obj": class_obj,
+        #     "subject_name": subject_name,
+        #     "subject_info": subject_info,
+        #     "soll_hours_term": SOLL_hours_term,
+        #     "sum_ist_hours_teacher": sum_IST_hours_teacher,
+        #     "rde": rde,
+        # }
+
+        reduced_r_vars = {}
+
+        for var in problem.variables():
+            # if var.name.startswith("r_"):
+            #     print(var.name, "=", var.varValue)
+            if var.name.startswith("var") and var.varValue == 1:
+                # print(var.name, "=", var.varValue)
+
+                # parts = _get_var_parts_obj(var.name)
+                # "teacher_key": parts[0],
+                # "subject_key": parts[1],
+                # "day_index": parts[2],
+                # "lesson_hour_slot_index": parts[3],
+                # "class_key": parts[4],
+                rde_var = vars_to_r_var_lookup[var]
+
+                if rde_var not in reduced_r_vars:
+                    reduced_r_vars[rde_var] = []
+
+                reduced_r_vars[rde_var].append(var)
+
+
+        grouped_by_class = {}
+
+        for r_var, vars in reduced_r_vars.items():
+            info_obj = r_var_stats_for_after_sol[r_var]
+            filled_slots_count = len(vars)
+            class_key = info_obj["class_key"]
+            subject_name = info_obj["subject_name"]
+            soll_hours_term = info_obj["soll_hours_term"]
+            sum_ist_hours_teacher = info_obj["sum_ist_hours_teacher"]
+
+            if ONLY_USE_BLOCKS_OF_TWO:
+                new_ist = sum_ist_hours_teacher + (filled_slots_count * 2)
+            else:
+                new_ist = sum_ist_hours_teacher + filled_slots_count
+
+            message = f"[{self.log_name}][SOL] class '{class_key}' subject '{subject_name}' old {sum_ist_hours_teacher}/{soll_hours_term}, new: {new_ist}/{soll_hours_term} (filled {filled_slots_count} new slots)"
+
+            if class_key not in grouped_by_class:
+                grouped_by_class[class_key] = []
+
+            grouped_by_class[class_key].append(message)
+
+        for group, messages in grouped_by_class.items():
+            for message in messages:
+                Logger.log(message)
 
 
     def solve_timetable_problem(self):

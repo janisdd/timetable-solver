@@ -381,45 +381,77 @@ class StundenplanHelper:
 
 
         self.problem += lpSum(all_rest_varialbes) + lpSum(all_diff_vars)
-        Logger.log(f"Starting solver ...")
+        Logger.log(f"Starting solver (pass 1) ...")
         self.problem.solve()
-        Logger.log(f"... solver finished")
+        Logger.log(f"... solver finished (pass 1)")
 
         # The status of the solution is printed to the screen
         print("Status:", LpStatus[self.problem.status])
+
+        if self.problem.status != 1:
+            Logger.error("No solution found (round 1)")
+            exit()
+
+        Logger.log("--- START Solution Stats (round 1) ---")
+        self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup, None)
+        Logger.log("--- END Solution Stats (round 1) ---")
+
+        all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
+        self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_1.xlsm')
+
+        fixed_var_variables_set = self.freeze_set_var_variables(self.problem)
 
         # because we try to minimize the differences
         #   it can happen that we don't proceed further because the missing values are the same
         #   then reducing it further would make the obj value worse again
         # so, a second run to place entries after that should work to fill the missing gaps
 
-        # for constraint_name in all_diff_constraint_names:
-        #     del self.problem.constraints[constraint_name]
-        #
-        # self.problem.solve()
+        for constraint_name in all_diff_constraint_names:
+            del self.problem.constraints[constraint_name]
+
+        Logger.log(f"[{self.log_name}] Starting solver (pass 2) ...")
+        self.problem.solve()
+        Logger.log(f"[{self.log_name}] ... solver finished (pass 2)")
 
         # The status of the solution is printed to the screen
         # print("Status:", LpStatus[self.problem.status])
 
         if self.problem.status != 1:
-            print("No solution found")
+            Logger.error("No solution found (round 2)")
             exit()
 
-        # Each of the variables is printed with it's resolved optimum value
-        for var in self.problem.variables():
-            if var.name.startswith("r_"):
-                print(var.name, "=", var.varValue)
-            if var.name.startswith("var") and var.varValue == 1:
-                print(var.name, "=", var.varValue)
+        # # Each of the variables is printed with it's resolved optimum value
+        # for var in self.problem.variables():
+        #     if var.name.startswith("r_"):
+        #         print(var.name, "=", var.varValue)
+        #     if var.name.startswith("var") and var.varValue == 1:
+        #         print(var.name, "=", var.varValue)
 
-        print("---------------")
-        self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup)
-        print("---------------")
+        Logger.log(f"[{self.log_name}] Starting solver (pass 2) ...")
+        self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup, fixed_var_variables_set)
+        Logger.log(f"[{self.log_name}] ... solver finished (pass 2)")
 
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
-        self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT2.xlsm')
+        self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_2.xlsm')
 
-    def print_solution_stats(self, problem, r_var_stats_for_after_sol, vars_to_r_var_lookup):
+    # we want to solve the problem twice,
+    # first try to reduce all differences between missing hours
+    #   this means we sometimes do not set vars because it would increase the difference (because we use abs)
+    # second pass should then fill the missing slots if possible (no particular order)
+    def freeze_set_var_variables(self, problem):
+
+        fixed_var_variables_set = set()
+        c_count = 0
+        for var in problem.variables():
+            if var.name.startswith("var") and var.varValue == 1:
+                # print(var.name, "=", var.varValue)
+                fixed_var_variables_set.add(var)
+                problem += var == 1, f"freeze var {var.name}, count: {c_count}"
+                c_count += 1
+
+        return fixed_var_variables_set
+
+    def print_solution_stats(self, problem, r_var_stats_for_after_sol, vars_to_r_var_lookup, fixed_var_variables_set):
         # stats_for_after_sol[rde] = {
         #     "class_key": class_key,
         #     "class_obj": class_obj,
@@ -436,7 +468,11 @@ class StundenplanHelper:
             # if var.name.startswith("r_"):
             #     print(var.name, "=", var.varValue)
             if var.name.startswith("var") and var.varValue == 1:
-                # print(var.name, "=", var.varValue)
+
+                if fixed_var_variables_set is not None and var in fixed_var_variables_set:
+                    continue
+
+                Logger.debug(f"[{self.log_name}][SOL] variable '{var.name}' is set to {var.varValue} in the solution")
 
                 # parts = _get_var_parts_obj(var.name)
                 # "teacher_key": parts[0],

@@ -5,6 +5,8 @@ from src.excel_extractor_gesamtuebersicht import ExcelExtractorGesamtuebersicht,
 from src.excel_extractor_stunden_erfassung import ExcelExtractorStundenerfassung
 from src.logger import Logger
 
+SOLVER_TIME_OUT_S = 120
+SOLVER_THREADS=4
 
 # TODO blocks (2 slots) is respected in existing teacher's timetables & existing class's timetables?
 
@@ -54,7 +56,7 @@ class StundenplanHelper:
         self.all_vars = LpVariable.dicts("var", all_var_names, cat="Binary")
 
     def setup_fixed_vars(self):
-        print('setup_fixed_vars')
+        # print('setup_fixed_vars')
         # some vars are fixed/known
         # - some classes slots/days should be skipped -> set all corresponding vars to 0 (see 'PLAN' sheet)
         #   (ignored days just set all slots to ignored)
@@ -77,10 +79,12 @@ class StundenplanHelper:
                 for slot_index, info_obj in enumerate(table_info_list):
                     filled_value = info_obj['entry']  # e.g. LF5(Gru) -> teacher already teachers subject here
                     ignore = info_obj['ignore']
+                    teacher_key = info_obj['teacher_key']
+                    subject_key = info_obj['subject_key'] # TODO currently ignored
 
-                    should_not_process = (filled_value is not None and filled_value != '') or ignore == True
+                    should_skip = (filled_value is not None and filled_value != '') or ignore == True
 
-                    if should_not_process:
+                    if should_skip:
                         var_names = get_all_vars_with_preset(self.all_var_names, class_key=class_key,
                                                              day_index=day_index, slot_index=slot_index)
 
@@ -101,6 +105,48 @@ class StundenplanHelper:
                             var) == 0, f"skip prefilled/skipped slots in plan, {day_index}, {slot_index} {c_count}"
                         c_count += 1
 
+                        if teacher_key is not None:
+                            # make sure the teacher is blocked for that slot
+                            _var_names = get_all_vars_with_preset(self.all_var_names, teacher_key=teacher_key,
+                                                                 day_index=day_index, slot_index=slot_index)
+
+                            _vars = [self.all_vars[var_name] for var_name in _var_names]
+
+                            Logger.debug(
+                                f"[{self.log_name}][FIXED Setup] blocking teacher '{teacher_key}' for class '{class_key}', day '{day_index}', slot '{slot_index}' for all other classes")
+
+                            self.problem += lpSum(
+                                _vars) == 0, f"block teacher {teacher_key} for slot, {day_index}, {slot_index} {c_count}"
+                            c_count += 1
+
+        # [table_dates, table_column_data, {
+        #     "start_row": table_start_row,
+        #     "start_col": table_start_col
+        # }, has_at_least_one_fixed_teacher]
+        for foreign_class_key, entry_obj in self.excel_extractor.foreign_classes_dict.items():
+
+            # [0] are just the heads (dates), [2] is the start coord (start_col, start_row)
+            table_body = entry_obj[1]
+
+            for day_index, table_info_list in enumerate(table_body):
+                for slot_index, info_obj in enumerate(table_info_list):
+                    filled_value = info_obj['entry']  # e.g. LF5(Gru) -> teacher already teachers subject here
+                    ignore = info_obj['ignore']
+                    teacher_key = info_obj['teacher_key']
+                    subject_key = info_obj['subject_key']  # TODO currently ignored
+
+                    if teacher_key is not None:
+                        # make sure the teacher is blocked for that slot
+                        _var_names = get_all_vars_with_preset(self.all_var_names, teacher_key=teacher_key,
+                                                              day_index=day_index, slot_index=slot_index)
+
+                        _vars = [self.all_vars[var_name] for var_name in _var_names]
+
+                        Logger.debug(f"[{self.log_name}][FIXED Setup] blocking teacher '{teacher_key}' for foreign class '{foreign_class_key}', day '{day_index}', slot '{slot_index}' for all other classes")
+
+                        self.problem += lpSum(
+                            _vars) == 0, f"block teacher {teacher_key} for foreign class slot, {day_index}, {slot_index} {c_count}"
+                        c_count += 1
 
         Logger.log(f"[{self.log_name}][FIXED Setup] setting up fixed variables based on teachers' availability preferences")
 
@@ -380,9 +426,11 @@ class StundenplanHelper:
                 all_diff_constraint_names.append(name_2.replace(" ", "_"))
 
 
+        solver = pulp.PULP_CBC_CMD(timeLimit=SOLVER_TIME_OUT_S, threads=SOLVER_THREADS)
+
         self.problem += lpSum(all_rest_varialbes) + lpSum(all_diff_vars)
         Logger.log(f"Starting solver (pass 1) ...")
-        self.problem.solve()
+        self.problem.solve(solver)
         Logger.log(f"... solver finished (pass 1)")
 
         # The status of the solution is printed to the screen
@@ -410,7 +458,7 @@ class StundenplanHelper:
             del self.problem.constraints[constraint_name]
 
         Logger.log(f"[{self.log_name}] Starting solver (pass 2) ...")
-        self.problem.solve()
+        self.problem.solve(solver)
         Logger.log(f"[{self.log_name}] ... solver finished (pass 2)")
 
         # The status of the solution is printed to the screen
@@ -434,6 +482,182 @@ class StundenplanHelper:
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_2.xlsm')
 
+    def solve_timetable_problem_3(self):
+
+        c_count = 0
+        all_rest_varialbes = []
+        # after the solution we want to show what was reduced and how many...
+        stats_for_after_sol = {}
+        vars_name_to_r_var_lookup = {}
+
+        big_sum_SOLL_hours_term = 0
+        for class_obj in self.excel_extractor.all_classes:
+            class_key = class_obj['key']
+            subjects_info = class_obj["subjects"]
+            for subject_info in subjects_info:
+                subject_name = subject_info["name"]
+
+                # SOLL for the subject e.g. 80
+                SOLL_hours_term = subject_info["hours_term"]
+                # this is our 'mde' (missing deu)
+                MISSING_hours_term = SOLL_hours_term
+
+                Logger.log(f"[{self.log_name}][OBJ] class '{class_key}' needs '{SOLL_hours_term}' times subject '{subject_name}'")
+
+                sum_IST_hours_teacher = 0
+                sum_SOLL_hours_term_teachers = 0
+                # check all connected teachers
+                for teacher_tracking_hours_obj in self.excel_stundenerfassung.all_soll_data_dict[class_key]:
+                    tracking_subject_name = teacher_tracking_hours_obj['subject_name']
+                    if subject_name == tracking_subject_name:
+                        teacher_key = teacher_tracking_hours_obj['teacher_key']
+                        hours_ist = teacher_tracking_hours_obj['ist']
+                        hours_soll = teacher_tracking_hours_obj['soll']
+                        # soll_per_week = teacher_tracking_hours_obj['soll_per_week']
+                        curr_soll_per_week = teacher_tracking_hours_obj['curr_soll_per_week']
+
+                        # total_weeks = hours_soll / soll_per_week
+
+                        teacher_missing_hours = hours_soll - hours_ist
+
+                        if ONLY_USE_BLOCKS_OF_TWO:
+                            teacher_missing_hours = teacher_missing_hours // 2
+
+                        if teacher_missing_hours <= 0:
+                            Logger.log(f"[{self.log_name}][OBJ] class '{class_key}' teacher key '{teacher_key}' already has enough hours, subject '{subject_name}' (IST: {hours_ist}, SOLL: {hours_soll}), IGNORING teacher for that class and subject")
+                            continue
+
+                        if curr_soll_per_week <= 0:
+                            Logger.log(
+                                f"[{self.log_name}][OBJ] class '{class_key}' teacher key '{teacher_key}' has negative current week hours --> no more weeks left?, IGNORING teacher for that class and subject")
+                            continue
+
+                        Logger.debug(
+                            f"[{self.log_name}][OBJ] class '{class_key}' teacher key '{teacher_key}' has IST hours '{hours_ist}' and SOLL hours '{hours_soll}' with curr_soll_per_week: {curr_soll_per_week}")
+
+
+                        # slack variable for how many ours are still to be filled
+                        # mde - sd1 - sd2 - sd3 - rde >= 0;
+                        # mde - sd1 - sd2 - sd3 - rde <= 0;
+                        # sd1, sd2, ... , are our vars (teacher slots for class, rde is the new var -> new remaining hours after solution)
+                        # in the obj function we then multiply (rde * soll_per_week)
+
+                        var_names = get_all_vars_with_preset(self.all_var_names,
+                                                             class_key=class_key,
+                                                             subject_key=subject_name,
+                                                             teacher_key=teacher_key)
+
+                        _vars = [-1 * self.all_vars[var_name] for var_name in var_names]
+                        plain_vars = [self.all_vars[var_name] for var_name in var_names]
+
+                        rde = pulp.LpVariable(f"r_{class_key}_{subject_name}_{teacher_key}", lowBound=0)
+
+                        # this is the same as ... == 0
+                        constraint1 = teacher_missing_hours + lpSum(_vars) - rde == 0
+                        self.problem += constraint1, f"res variable for '{class_key}', subject '{subject_name}', teacher '{teacher_key}' == 0, {c_count}"
+                        c_count += 1
+
+                        all_rest_varialbes.append(rde * curr_soll_per_week)
+
+                        # make sure we don't take too much...
+                        max_hours_per_week = curr_soll_per_week
+
+                        if ONLY_USE_BLOCKS_OF_TWO:
+                            max_hours_per_week = math.ceil(max_hours_per_week / 2)
+                        else:
+                            max_hours_per_week = math.ceil(max_hours_per_week)
+
+                        _vars = [-1 * self.all_vars[var_name] for var_name in var_names]
+                        constraint_max_hours_per_week = max_hours_per_week + lpSum(_vars) >= 0
+                        self.problem += constraint_max_hours_per_week, f"max hours for class '{class_key}', subject '{subject_name}', teacher '{teacher_key}' == {max_hours_per_week}, {c_count}"
+                        c_count += 1
+
+                        stats_for_after_sol[rde] = {
+                            "class_key": class_key,
+                            "class_obj": class_obj,
+                            "subject_name": subject_name,
+                            "subject_info": subject_info,
+                            "teacher_key": teacher_key,
+                            "teacher_tracking_hours_obj": teacher_tracking_hours_obj,
+                            "soll_hours_term": SOLL_hours_term,
+                            "sum_ist_hours_teacher": sum_IST_hours_teacher,
+                            "rde": rde,
+                            "vars": _vars
+                        }
+
+                        for plain_var in plain_vars:
+                            # print(plain_var.name)
+                            vars_name_to_r_var_lookup[plain_var] = rde
+
+                        sum_SOLL_hours_term_teachers += hours_soll
+                        sum_IST_hours_teacher += hours_ist
+
+
+
+                if sum_SOLL_hours_term_teachers != SOLL_hours_term:
+                    Logger.warn(
+                        f"[{self.log_name}][OBJ] class '{class_key}' subject '{subject_name}' has SOLL hours term '{SOLL_hours_term}' but sum of SOLL hours from teachers is '{sum_SOLL_hours_term_teachers}', using teachers' SOLL hours '{sum_SOLL_hours_term_teachers}'!")
+
+
+        # solver = pulp.PULP_CBC_CMD(timeLimit=SOLVER_TIME_OUT_S, threads=SOLVER_THREADS)
+        solver = pulp.PULP_CBC_CMD()
+
+        self.problem += lpSum(all_rest_varialbes)
+        Logger.log(f"Starting solver (pass 1) ...")
+        self.problem.solve(solver)
+        Logger.log(f"... solver finished (pass 1)")
+
+        # The status of the solution is printed to the screen
+        print("Status:", LpStatus[self.problem.status])
+
+        if self.problem.status != 1:
+            Logger.error("No solution found (round 1)")
+            exit()
+
+        Logger.log("--- START Solution Stats (round 1) ---")
+        self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup, None)
+        Logger.log("--- END Solution Stats (round 1) ---")
+
+        all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
+        self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_1.xlsm')
+
+        print("end")
+
+        # fixed_var_variables_set = self.freeze_set_var_variables(self.problem)
+        #
+        # # because we try to minimize the differences
+        # #   it can happen that we don't proceed further because the missing values are the same
+        # #   then reducing it further would make the obj value worse again
+        # # so, a second run to place entries after that should work to fill the missing gaps
+        #
+        # for constraint_name in all_diff_constraint_names:
+        #     del self.problem.constraints[constraint_name]
+        #
+        # Logger.log(f"[{self.log_name}] Starting solver (pass 2) ...")
+        # self.problem.solve(solver)
+        # Logger.log(f"[{self.log_name}] ... solver finished (pass 2)")
+        #
+        # # The status of the solution is printed to the screen
+        # # print("Status:", LpStatus[self.problem.status])
+        #
+        # if self.problem.status != 1:
+        #     Logger.error("No solution found (round 2)")
+        #     exit()
+
+        # # Each of the variables is printed with it's resolved optimum value
+        # for var in self.problem.variables():
+        #     if var.name.startswith("r_"):
+        #         print(var.name, "=", var.varValue)
+        #     if var.name.startswith("var") and var.varValue == 1:
+        #         print(var.name, "=", var.varValue)
+
+        # Logger.log(f"[{self.log_name}] Starting solver (pass 2) ...")
+        # self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup, fixed_var_variables_set)
+        # Logger.log(f"[{self.log_name}] ... solver finished (pass 2)")
+        #
+        # all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
+        # self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_2.xlsm')
+
     # we want to solve the problem twice,
     # first try to reduce all differences between missing hours
     #   this means we sometimes do not set vars because it would increase the difference (because we use abs)
@@ -453,13 +677,16 @@ class StundenplanHelper:
 
     def print_solution_stats(self, problem, r_var_stats_for_after_sol, vars_to_r_var_lookup, fixed_var_variables_set):
         # stats_for_after_sol[rde] = {
-        #     "class_key": class_key,
-        #     "class_obj": class_obj,
-        #     "subject_name": subject_name,
-        #     "subject_info": subject_info,
-        #     "soll_hours_term": SOLL_hours_term,
-        #     "sum_ist_hours_teacher": sum_IST_hours_teacher,
-        #     "rde": rde,
+        #       "class_key": class_key,
+        #       "class_obj": class_obj,
+        #       "subject_name": subject_name,
+        #       "subject_info": subject_info,
+        #       "teacher_key": teacher_key,
+        #       "teacher_tracking_hours_obj": teacher_tracking_hours_obj,
+        #       "soll_hours_term": SOLL_hours_term,
+        #       "sum_ist_hours_teacher": sum_IST_hours_teacher,
+        #       "rde": rde,
+        #       "vars": _vars
         # }
 
         reduced_r_vars = {}
@@ -497,13 +724,14 @@ class StundenplanHelper:
             subject_name = info_obj["subject_name"]
             soll_hours_term = info_obj["soll_hours_term"]
             sum_ist_hours_teacher = info_obj["sum_ist_hours_teacher"]
+            teacher_key = info_obj["teacher_key"]
 
             if ONLY_USE_BLOCKS_OF_TWO:
                 new_ist = sum_ist_hours_teacher + (filled_slots_count * 2)
             else:
                 new_ist = sum_ist_hours_teacher + filled_slots_count
 
-            message = f"[{self.log_name}][SOL] class '{class_key}' subject '{subject_name}' old {sum_ist_hours_teacher}/{soll_hours_term}, new: {new_ist}/{soll_hours_term} (filled {filled_slots_count} new slots)"
+            message = f"[{self.log_name}][SOL] class '{class_key}' subject '{subject_name}({teacher_key})' old {sum_ist_hours_teacher}/{soll_hours_term}, new: {new_ist}/{soll_hours_term} (filled {filled_slots_count} new slots)"
 
             if class_key not in grouped_by_class:
                 grouped_by_class[class_key] = []
@@ -857,5 +1085,5 @@ stundenplaner.init_new_timetable_problem()
 stundenplaner.setup_fixed_vars()
 stundenplaner.setup_constraints()
 # stundenplaner.solve_timetable_problem()
-stundenplaner.solve_timetable_problem_2()
+stundenplaner.solve_timetable_problem_3()
 # stundenplaner.write_timetable_solution_to_excel('example/07_KW 45_03.11.-07.11.2025_OUT.xlsm')

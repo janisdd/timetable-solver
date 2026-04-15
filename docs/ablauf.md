@@ -21,8 +21,14 @@
   - dann wird für jeden slot in jedem Plan bestimmt, ob er gesetzt werden soll oder nicht (wenn schon was drinne steht, dann nicht)
     - wenn die Farbe `kann nur da` (grün) ist, dann wird der Slot gesetzt
     - wenn die Farbe `kann da nicht` (rot) ist, dann wird der Slot nicht gesetzt
+    - man kann auch eine konkrete Klasse eintragen
+      - existiert die klasse nicht, so wird der slot trotzdem als skipped markiert (wird nicht für den lehrer vergeben)
+        - (siehe _teacher_sanity_checks)
   - dann wird der Gesamtplan (Sheet `Plan`) ausgelesen
 
+- unterhalb jeder tabelle für jede klasse (erste zeile drunter) kann mit rot der tag makiert werden, damit der ganze tag nicht verplant wird
+- als einträge kann man `(Jo)` schreiben, dann wird für den lehrer für den tag/slot alles gesperrt, auch wenn das fach nicht bekannt ist
+- normale Einträge `LF5(Jo)` sperrent auch, aber nur das fach Fach LF5 (und alles für den lehrer)
 
 
 ## TODOs

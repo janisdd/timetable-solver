@@ -209,6 +209,9 @@ class ExcelExtractorStundenerfassung:
 
                 soll_cell = ws.cell(row=curr_row, column=soll_start_col)
 
+                soll_per_week_cell = ws.cell(row=curr_row, column=soll_start_col + 1)
+                soll_per_week_value = soll_per_week_cell.value
+
                 # soll x. jahr
                 soll_value = soll_cell.value
                 # ist akkum x. jahr
@@ -218,6 +221,12 @@ class ExcelExtractorStundenerfassung:
                 if soll_value is None or soll_value == "" or soll_value == 0:
                     continue
 
+                # akt. Soll WS 2. Jahr
+                # this many hours per week are needed to meet the target hours
+                curr_soll_per_week_cell = ws.cell(row=curr_row, column=soll_start_col + 4)
+                curr_soll_per_week_value = curr_soll_per_week_cell.value
+
+
                 # only log once
                 if not found_correct_year_index:
                     Logger.log(
@@ -225,6 +234,15 @@ class ExcelExtractorStundenerfassung:
 
                 found_correct_year_index = True
                 correct_year_index = curr_year_index
+
+                if soll_per_week_value == 0 or soll_per_week_value == 0.0:
+                    Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll per week' is 0 for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_per_week_cell)}' -> this should not happen, please check if the soll per week value is correct, using 0.01 as default")
+                    soll_per_week_value = 0.01
+
+                if type(curr_soll_per_week_value) != float and type(curr_soll_per_week_value) != int:
+                    # Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll per week' is not a number(float) for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_per_week_cell)}', value: {soll_per_week_value} -> this should not happen, please check if the soll per week value is correct")
+                    raise Exception(
+                        f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll per week' is not a number(float) for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_per_week_cell)}', value: {soll_per_week_value} -> this should not happen, please check if the soll per week value is correct")
 
                 # teacher_name_value = ws.cell(row=curr_row, column=name_col).value
                 # abkürzung
@@ -375,9 +393,11 @@ class ExcelExtractorStundenerfassung:
                     # "teacher_name": teacher_name_value,
                     "teacher_subject_pair": teacher_subject_pair_value,
                     "soll": soll_value,
+                    "soll_per_week": soll_per_week_value,
+                    "curr_soll_per_week": curr_soll_per_week_value,
                     "ist": ist_akkum_value,
                     "teacher_key": teacher_key,
-                    "subject_name": subject_name_value.strip()
+                    "subject_name": subject_name_value.strip(),
                 }
                 curr_soll_data_array.append(soll_info)
 

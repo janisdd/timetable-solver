@@ -39,6 +39,7 @@ class ExcelExtractorGesamtuebersicht:
         self.all_teachers_dict = None
         self.all_classes = None
         self.subject_name_to_key_dict = None
+        self.foreign_classes_dict = None # classes not managed by us but teacher can have slots there
 
     def read_all(self):
         Logger.debug(f"[{self.log_name}] reading excel file {self.excel_file_all_classes_path}")
@@ -136,8 +137,8 @@ class ExcelExtractorGesamtuebersicht:
         self.make_teacher_availability_and_prefs_canonical(self.all_teachers_list,
                                                            self.color_legend_teacher_availability)
 
-        all_table_data_dict = self.extract_current_plan_from_sheet(wb_plan_preferences,
-                                                                   self.color_legend_teacher_availability)
+        all_table_data_dict = self.extract_current_class_plans_from_sheet(wb_plan_preferences,
+                                                                          self.color_legend_teacher_availability, self.all_teachers_dict)
 
 
         # this also removes empty classes (no subjects)
@@ -975,7 +976,7 @@ class ExcelExtractorGesamtuebersicht:
 
                         if not is_known_class:
                             Logger.warn(
-                                f"[{self.log_name}] teacher {Logger.get_teacher_full(teacher_obj)} has availability plan entry for unknown class '{prefilled_class}' on day index '{day_index}' slot '{slot_index}' -> slot will be set to skip/not allowed")
+                                f"[{self.log_name}] teacher {Logger.get_teacher_full(teacher_obj)} has availability plan entry for unknown class '{prefilled_class}' on day index '{day_index}' slot '{slot_index}' -> slot will be set to skip/not allowed nonetheless")
                             slot_obj['allowed'] = False
                             slot_obj['class_key'] = None
 
@@ -1083,9 +1084,13 @@ class ExcelExtractorGesamtuebersicht:
             all_classes.remove(class_obj)
 
     # see extract_single_teacher_preferences_from_sheet
-    def extract_current_single_plan_from_sheet(self, ws_plan, curr_row, curr_col, class_name,
-                                               color_legend_teacher_availability):
+    def extract_current_single_class_plan_from_sheet(self, ws_plan, curr_row, curr_col, class_name,
+                                                     color_legend_teacher_availability, all_teachers_dict):
         curr_class_name_cell = ws_plan.cell(row=curr_row, column=curr_col)
+
+        # when we don't have this class actually (foreign) but the teacher has a filled slot there
+        #  we want to block that teacher for our classes
+        has_at_least_one_fixed_teacher = False
 
         slots_per_day = 8
         num_days = 5
@@ -1108,10 +1113,33 @@ class ExcelExtractorGesamtuebersicht:
                 # just ignore anything in that cell -> we should not fill / process it
                 # should_ignore_cell = cell_color == color_legend_teacher_availability["do_not_process_bg_color"]
 
-                day_slots.append({
+                teacher_key = None
+                subject_key = None
+
+                parse_result = self.parse_plan_cell_value(cell)
+
+                if parse_result is not None:
+                    teacher_key = parse_result["teacher_key"]
+                    subject_key = parse_result["subject_key"]
+
+                    if teacher_key is not None:
+                        if teacher_key not in all_teachers_dict:
+                            Logger.warn(f"[{self.log_name}][Sheet {SHEET_OVERVIEW_PLAN}] cell '{Logger.get_cell_full_coord(cell)}' has entry '{cell.value}' but teacher part is '{teacher_key}' is not a know teacher! --> IGNORING")
+                            teacher_key = None
+                        else:
+                            # , subject_key='{subject_key}' not yet used
+                            has_at_least_one_fixed_teacher = True
+                            Logger.debug(
+                                f"[{self.log_name}] parsed plan cell value '{cell.value}' at {Logger.get_cell_full_coord(cell)}, result: teacher_key='{teacher_key}'")
+
+                day_slot_entry = {
                     "entry": cell.value,
-                    "ignore": False
-                })
+                    "ignore": False,
+                    "teacher_key": teacher_key,
+                    "subject_key": subject_key, # can still be empty if we only have a teacher e.g. (Jo) # TODO currently ignored
+                }
+
+                day_slots.append(day_slot_entry)
 
             should_ignore_day = False
             ignore_day_cell = ws_plan.cell(row=curr_row + slots_per_day + 2, column=col)
@@ -1129,11 +1157,72 @@ class ExcelExtractorGesamtuebersicht:
             table.append(day_slots)
             day_index += 1
 
-        return dates, table
+        return dates, table, has_at_least_one_fixed_teacher
+
+    # e.g.
+    # (Jo)
+    # LF5(Jo)
+    # <subject_key>(<teacher_key>)
+    # return {subject_key, teacher_key}
+    def parse_plan_cell_value(self, cell):
+
+        cell_value = cell.value
+
+        """
+        Parse a plan cell value and return a dict with keys:
+          - subject_key: subject identifier or None
+          - teacher_key: teacher identifier or None
+
+        Supported formats (examples):
+          - "(Jo)"                -> {'subject_key': None, 'teacher_key': 'Jo'}
+          - "LF5(Jo)"            -> {'subject_key': 'LF5', 'teacher_key': 'Jo'}
+          - "SUBJ(TEA)"          -> {'subject_key': 'SUBJ', 'teacher_key': 'TEA'}
+
+        Returns None if cell_value is None or an empty string.
+        Raises ValueError for values that don't match expected patterns.
+        """
+
+        if cell_value is None:
+            return None
+
+        # Normalize to string and strip whitespace/newlines
+        raw = str(cell_value).strip()
+        if raw == "":
+            return None
+
+        # Expect a teacher in parentheses at the end, optionally preceded by a subject
+        # Find the last '(' and last ')'
+        if '(' in raw and raw.endswith(')'):
+            idx = raw.rfind('(')
+            subject_part = raw[:idx].strip()
+            teacher_part = raw[idx + 1:-1].strip()
+
+            subject_key = subject_part if subject_part != "" else None
+            teacher_key = teacher_part if teacher_part != "" else None
+
+            # if both are None, treat as empty
+            if subject_key is None and teacher_key is None:
+                return None
+
+            return {
+                "subject_key": subject_key,
+                "teacher_key": teacher_key
+            }
+
+        # # If no parentheses, it might be just a teacher key without parentheses or just subject
+        # # Treat a single token like 'Jo' as teacher_key
+        # tokens = raw.split()
+        # if len(tokens) == 1:
+        #     # single token -> assume teacher key
+        #     return {"subject_key": None, "teacher_key": tokens[0].strip()}
+
+        # Unknown / unsupported format
+        raise ValueError(f"Unsupported plan cell format: '{cell_value}'")
+
 
     # extract the current state of the plan from the sheet
     # the task is to fill out ONLY the missing fields
-    def extract_current_plan_from_sheet(self, wb_prefs, color_legend_teacher_availability):
+    def extract_current_class_plans_from_sheet(self, wb_prefs, color_legend_teacher_availability, all_teachers_dict):
         ws_plan = wb_prefs[SHEET_OVERVIEW_PLAN]
 
         start_col = 2
@@ -1170,10 +1259,11 @@ class ExcelExtractorGesamtuebersicht:
                     break
                 else:
                     # extract single
-                    table_data = self.extract_current_single_plan_from_sheet(ws_plan, curr_row, curr_col, class_key,
-                                                                             color_legend_teacher_availability)
+                    table_data = self.extract_current_single_class_plan_from_sheet(ws_plan, curr_row, curr_col, class_key,
+                                                                                   color_legend_teacher_availability, all_teachers_dict)
                     table_dates = table_data[0]
                     table_column_data = table_data[1]
+                    has_at_least_one_fixed_teacher = table_data[2]
                     # here is the class name
                     table_start_row = curr_row
                     table_start_col = curr_col
@@ -1181,7 +1271,7 @@ class ExcelExtractorGesamtuebersicht:
                     all_table_data_dict[class_key] = [table_dates, table_column_data, {
                         "start_row": table_start_row,
                         "start_col": table_start_col
-                    }]
+                    }, has_at_least_one_fixed_teacher]
 
                 curr_col += col_increment
 
@@ -1202,11 +1292,12 @@ class ExcelExtractorGesamtuebersicht:
         #         }]
 
         used_class_keys = []
+        self.foreign_classes_dict = {}
 
         for class_obj in all_classes:
             class_key = class_obj["key"]
             if class_key not in all_table_data_dict:
-                Logger.warn(f"class key '{class_key}' was not found in table data (Sheet {SHEET_OVERVIEW_PLAN}) but has data in hours data excel table with subjects")
+                Logger.warn(f"[{self.log_name}] class key '{class_key}' was not found in table data (Sheet {SHEET_OVERVIEW_PLAN}) but has data in hours data excel table with subjects")
                 continue
             used_class_keys.append(class_key)
             class_obj['table_dates'] = all_table_data_dict[class_key]
@@ -1218,6 +1309,13 @@ class ExcelExtractorGesamtuebersicht:
 
         for class_key in difference_class_keys:
             Logger.warn(f"[{self.log_name}] class key '{class_key}' has table data (Sheet {SHEET_OVERVIEW_PLAN}) but was not found in all classes (hours data excel table with subjects) -> ignoring class")
+            # has_at_least_one_fixed_teacher
+            entry_obj = all_table_data_dict[class_key]
+            has_at_least_one_fixed_teacher = entry_obj[3]
+            if has_at_least_one_fixed_teacher:
+                Logger.warn(
+                    f"[{self.log_name}] BUT we have at least one slot with a known teacher -> teacher will be blocked for that slot (assuming foreign class)")
+                self.foreign_classes_dict[class_key] = entry_obj
 
 
     def _validate_class_and_teachers(self, all_classes, all_teachers_list, all_teachers_dict):

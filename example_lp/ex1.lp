@@ -24,6 +24,8 @@ mma - sm1 - sm2 - sm3 >= 0;
 mde - sd1 - sd2 - sd3 - rde >= 0;
 mde - sd1 - sd2 - sd3 - rde <= 0;
 
+1 - sd1 - sd2 - sd3 >= 0;
+
 /* introduce rma as temporary variable */
 mma - sm1 - sm2 - sm3 - rma >= 0;
 mma - sm1 - sm2 - sm3 - rma <= 0;

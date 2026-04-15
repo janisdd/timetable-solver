@@ -7,6 +7,7 @@ from src.logger import Logger
 
 SOLVER_TIME_OUT_S = 120
 SOLVER_THREADS=4
+MAX_SUBJ_PER_DAY=1
 
 # TODO blocks (2 slots) is respected in existing teacher's timetables & existing class's timetables?
 
@@ -504,6 +505,18 @@ class StundenplanHelper:
 
                 Logger.log(f"[{self.log_name}][OBJ] class '{class_key}' needs '{SOLL_hours_term}' times subject '{subject_name}'")
 
+                for day_index in range(self.max_days):
+                    # make sure we only have one subject only 1x per day
+                    var_names = get_all_vars_with_preset(self.all_var_names,
+                                                         class_key=class_key,
+                                                         subject_key=subject_name,
+                                                         day_index=day_index)
+
+                    _vars = [self.all_vars[var_name] for var_name in var_names]
+                    constraint_max_subj_per_day = lpSum(_vars) <= MAX_SUBJ_PER_DAY # 1
+                    self.problem += constraint_max_subj_per_day, f"'{class_key}', subject '{subject_name}' <= {MAX_SUBJ_PER_DAY}, {c_count}"
+                    c_count += 1
+
                 sum_IST_hours_teacher = 0
                 sum_SOLL_hours_term_teachers = 0
                 # check all connected teachers
@@ -557,6 +570,9 @@ class StundenplanHelper:
                         self.problem += constraint1, f"res variable for '{class_key}', subject '{subject_name}', teacher '{teacher_key}' == 0, {c_count}"
                         c_count += 1
 
+                        # by * curr_soll_per_week we weight the combos higher where more hours are missing
+                        # so, when we have two combos with similar values and we take this week more of combo 1
+                        #  then we should take the next week more of combo 2 because the curr_soll_per_week has switched
                         all_rest_varialbes.append(rde * curr_soll_per_week)
 
                         # make sure we don't take too much...
@@ -622,6 +638,9 @@ class StundenplanHelper:
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_1.xlsm')
 
         print("end")
+
+        # TODO fix vars and then second fill run...
+        # TODO prefilled value 1x per day?
 
         # fixed_var_variables_set = self.freeze_set_var_variables(self.problem)
         #

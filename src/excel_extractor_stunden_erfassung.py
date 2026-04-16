@@ -140,7 +140,7 @@ class ExcelExtractorStundenerfassung:
             self.all_soll_data_dict[stundenerfassung_obj["class_key"]] = stundenerfassung_obj["soll_data_array"]
 
         # we are only allowed to write to "PLAN" sheet
-        print("finished reading excel files")
+        Logger.log(f"finished reading stundenerfassung excel files")
 
     def read_single_stundenerfassung(self, excel_files_stundenerfassung_path, class_obj):
         workbook = openpyxl.load_workbook(excel_files_stundenerfassung_path, read_only=False, data_only=True)
@@ -255,6 +255,7 @@ class ExcelExtractorStundenerfassung:
 
                 if subject_name_value is not None and type(subject_name_value) != str:
                     raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] subject name must be a string, cell: {Logger.get_cell_full_coord(subject_name_cell)}, value: {subject_name_value}")
+
 
                 # try to extract the teacher from teacher_subject_pair_value value
                 # e.g. Ma(Wind)
@@ -391,12 +392,12 @@ class ExcelExtractorStundenerfassung:
                 soll_info = {
                     "lfd_nr": lfd_nr_value,
                     # "teacher_name": teacher_name_value,
-                    "teacher_subject_pair": teacher_subject_pair_value,
+                    "teacher_subject_pair": teacher_subject_pair_value.strip(),
                     "soll": soll_value,
                     "soll_per_week": soll_per_week_value,
                     "curr_soll_per_week": curr_soll_per_week_value,
                     "ist": ist_akkum_value,
-                    "teacher_key": teacher_key,
+                    "teacher_key": teacher_key.strip(),
                     "subject_name": subject_name_value.strip(),
                 }
                 curr_soll_data_array.append(soll_info)

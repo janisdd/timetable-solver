@@ -296,8 +296,11 @@ class ExcelExtractorGesamtuebersicht:
                 raise Exception(
                     f"[{self.log_name}][mapping excel file] subject short form is None in row {row_j}, column {start_col} (name: {subject_name_cell.value})")
 
-            subject_short = subject_short_cell.value
+            subject_short = subject_short_cell.value.strip()
             subject_name = subject_name_cell.value
+
+            if subject_name is not None:
+                subject_name = subject_name.strip()
 
             # subject_name_to_key_dict contains all subject names with None as key
             if subject_name not in subject_name_to_key_dict:
@@ -672,7 +675,7 @@ class ExcelExtractorGesamtuebersicht:
                 subject_hours_term = ws.cell(row=subjects_hours_term, column=col)
 
                 subject_obj = {
-                    "name": subject_cell.value,
+                    "name": subject_cell.value.strip(),
                     "col": subject_cell.column,
                     "coord": subject_cell.coordinate,
                     "hours_total": subject_hours_total.value,
@@ -725,10 +728,10 @@ class ExcelExtractorGesamtuebersicht:
             teacher_key = teacher_data[i]
             teacher_obj = {
                 "contract_form": contract_form,
-                "last_name": last_name,
-                "first_name": first_name,
-                "teacher_full_name": f"{first_name} {last_name}",
-                "key": teacher_key,
+                "last_name": last_name.strip(),
+                "first_name": first_name.strip(),
+                "teacher_full_name": f"{first_name} {last_name}".strip(),
+                "key": str(teacher_key).strip(),
                 "availability_preference_table": None
             }
             all_teachers_dict[teacher_key] = teacher_obj

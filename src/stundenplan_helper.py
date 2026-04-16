@@ -499,6 +499,9 @@ class StundenplanHelper:
             for subject_info in subjects_info:
                 subject_name = subject_info["name"]
 
+                # if class_key == "'Erz24A.'" or class_key == 'Erz24A.':
+                #     print()
+
                 # SOLL for the subject e.g. 80
                 SOLL_hours_term = subject_info["hours_term"]
                 # this is our 'mde' (missing deu)
@@ -520,6 +523,7 @@ class StundenplanHelper:
 
                 sum_IST_hours_teacher = 0
                 sum_SOLL_hours_term_teachers = 0
+                found_teachers_with_valid_stats = 0
                 # check all connected teachers
                 for teacher_tracking_hours_obj in self.excel_stundenerfassung.all_soll_data_dict[class_key]:
                     tracking_subject_name = teacher_tracking_hours_obj['subject_name']
@@ -546,6 +550,7 @@ class StundenplanHelper:
                                 f"[{self.log_name}][OBJ] class '{class_key}' teacher key '{teacher_key}' has negative current week hours --> no more weeks left?, IGNORING teacher for that class and subject")
                             continue
 
+                        found_teachers_with_valid_stats += 1
                         Logger.debug(
                             f"[{self.log_name}][OBJ] class '{class_key}' teacher key '{teacher_key}' has IST hours '{hours_ist}' and SOLL hours '{hours_soll}' with curr_soll_per_week: {curr_soll_per_week}")
 
@@ -616,6 +621,13 @@ class StundenplanHelper:
                     Logger.warn(
                         f"[{self.log_name}][OBJ] class '{class_key}' subject '{subject_name}' has SOLL hours term '{SOLL_hours_term}' but sum of SOLL hours from teachers is '{sum_SOLL_hours_term_teachers}', using teachers' SOLL hours '{sum_SOLL_hours_term_teachers}'!")
 
+                if found_teachers_with_valid_stats > 0:
+                    Logger.log(
+                        f"[{self.log_name}][OBJ] class '{class_key}' subject '{subject_name}' found {found_teachers_with_valid_stats} valid teachers")
+                else:
+                    Logger.error(
+                        f"[{self.log_name}][OBJ] class '{class_key}' subject '{subject_name}' found {found_teachers_with_valid_stats} valid teachers! Without teachers this subject will not be filled for this class!")
+
 
         # solver = pulp.PULP_CBC_CMD(timeLimit=SOLVER_TIME_OUT_S, threads=SOLVER_THREADS)
         solver = pulp.PULP_CBC_CMD()
@@ -650,9 +662,39 @@ class StundenplanHelper:
         for constraint_name in all_constraints_max_hours_per_week_names:
             del self.problem.constraints[constraint_name]
 
+
+        # test_var = get_all_vars_with_preset(self.all_var_names, class_key="Erz24B.", subject_key="Eng (80/80)",
+        #                                     teacher_key="Wie",
+        #                                     day_index=4, slot_index=2)
+        #
+        # test_vars = [self.all_vars[var_name] for var_name in test_var]
+        # _test_const = lpSum(test_vars) == 1
+        # self.problem += _test_const, f"sum, {c_count}"
+        # c_count += 1
+        #
+        # test_var = get_all_vars_with_preset(self.all_var_names, class_key="Erz24B.", subject_key="Eng (80/80)",
+        #                                     teacher_key="Wie",
+        #                                     day_index=3, slot_index=0)
+        #
+        # test_vars = [self.all_vars[var_name] for var_name in test_var]
+        # _test_const = lpSum(test_vars) == 1
+        # self.problem += _test_const, f"sum, {c_count}"
+        # c_count += 1
+
+
+
+
         Logger.log(f"[{self.log_name}] Starting solver (pass 2) ...")
         self.problem.solve(solver)
         Logger.log(f"[{self.log_name}] ... solver finished (pass 2)")
+
+        if self.problem.status != 1:
+            Logger.error("No solution found (round 2)")
+            exit()
+
+        Logger.log("--- START Solution Stats (round 2) ---")
+        self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup, fixed_var_variables_set)
+        Logger.log("--- END Solution Stats (round 2) ---")
 
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_2.xlsm')

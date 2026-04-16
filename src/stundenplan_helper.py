@@ -656,6 +656,10 @@ class StundenplanHelper:
         #   so can use more than we need (we have an avg that we should take per week to fulfill the requirements
         #     but now we are allowed to take more)
         # still, we try to use hours from the subjects where most are missing (avg)
+        #
+        # if we have enough missing the second pass might get empty because all is filled
+        #  the second pass is only important if we don't have enough missing to fill
+        #  then then we want to fill, even if we fill more than the max hours per week (avg)
 
         fixed_var_variables_set = self.freeze_set_var_variables_in_problem(self.problem)
 

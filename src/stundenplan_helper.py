@@ -448,7 +448,7 @@ class StundenplanHelper:
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_1.xlsm')
 
-        fixed_var_variables_set = self.freeze_set_var_variables(self.problem)
+        fixed_var_variables_set = self.freeze_set_var_variables_in_problem(self.problem)
 
         # because we try to minimize the differences
         #   it can happen that we don't proceed further because the missing values are the same
@@ -490,6 +490,7 @@ class StundenplanHelper:
         # after the solution we want to show what was reduced and how many...
         stats_for_after_sol = {}
         vars_name_to_r_var_lookup = {}
+        all_constraints_max_hours_per_week_names = []
 
         big_sum_SOLL_hours_term = 0
         for class_obj in self.excel_extractor.all_classes:
@@ -586,6 +587,7 @@ class StundenplanHelper:
                         _vars = [-1 * self.all_vars[var_name] for var_name in var_names]
                         constraint_max_hours_per_week = max_hours_per_week + lpSum(_vars) >= 0
                         self.problem += constraint_max_hours_per_week, f"max hours for class '{class_key}', subject '{subject_name}', teacher '{teacher_key}' == {max_hours_per_week}, {c_count}"
+                        all_constraints_max_hours_per_week_names.append(constraint_max_hours_per_week.name)
                         c_count += 1
 
                         stats_for_after_sol[rde] = {
@@ -637,24 +639,35 @@ class StundenplanHelper:
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_1.xlsm')
 
+        # fix vars and then second fill run... we were limited to 1x combo per day
+        #   but also on max hours per week (from stundenerfassung) -> second run should not be limited on max hours per week
+        #   so can use more than we need (we have an avg that we should take per week to fulfill the requirements
+        #     but now we are allowed to take more)
+        # still, we try to use hours from the subjects where most are missing (avg)
+
+        fixed_var_variables_set = self.freeze_set_var_variables_in_problem(self.problem)
+
+        for constraint_name in all_constraints_max_hours_per_week_names:
+            del self.problem.constraints[constraint_name]
+
+        Logger.log(f"[{self.log_name}] Starting solver (pass 2) ...")
+        self.problem.solve(solver)
+        Logger.log(f"[{self.log_name}] ... solver finished (pass 2)")
+
+        all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
+        self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_2.xlsm')
+
         print("end")
 
-        # TODO fix vars and then second fill run...
-        # TODO prefilled value 1x per day?
 
-        # fixed_var_variables_set = self.freeze_set_var_variables(self.problem)
-        #
+        # TODO prefilled value 1x per day? also include prefilled in missing and so on
+
         # # because we try to minimize the differences
         # #   it can happen that we don't proceed further because the missing values are the same
         # #   then reducing it further would make the obj value worse again
         # # so, a second run to place entries after that should work to fill the missing gaps
         #
-        # for constraint_name in all_diff_constraint_names:
-        #     del self.problem.constraints[constraint_name]
-        #
-        # Logger.log(f"[{self.log_name}] Starting solver (pass 2) ...")
-        # self.problem.solve(solver)
-        # Logger.log(f"[{self.log_name}] ... solver finished (pass 2)")
+
         #
         # # The status of the solution is printed to the screen
         # # print("Status:", LpStatus[self.problem.status])
@@ -681,7 +694,7 @@ class StundenplanHelper:
     # first try to reduce all differences between missing hours
     #   this means we sometimes do not set vars because it would increase the difference (because we use abs)
     # second pass should then fill the missing slots if possible (no particular order)
-    def freeze_set_var_variables(self, problem):
+    def freeze_set_var_variables_in_problem(self, problem):
 
         fixed_var_variables_set = set()
         c_count = 0

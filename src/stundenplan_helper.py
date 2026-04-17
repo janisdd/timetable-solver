@@ -107,7 +107,7 @@ class StundenplanHelper:
                                 f"[{self.log_name}][FIXED Setup] skipping day '{day_index}', slot '{slot_index}' for class '{class_key}' because of non-empty prefilled value: {prefilled_value}")
 
                         if len(var_names) == 0:
-                            print("TODO TODO")
+                            print("TODO TODO setup_fixed_vars")
 
                         var = [self.all_vars[var_name] for var_name in var_names]
                         # self.problem += lpSum(var) == 0, f"skip prefilled slots in plan {var_names}, {day_index}, {slot_index}"
@@ -243,7 +243,7 @@ class StundenplanHelper:
                         Logger.log(f"[{self.log_name}][FIXED Setup] skip fixed teacher day '{day_index}', slots '{slot_index}' for teacher '{teacher_key}' because blacklist (class: '{class_key}')")
 
                         if len(var_names) == 0:
-                            print("TODO TODO")
+                            print("TODO TODO setup_fixed_vars")
 
                         var = [self.all_vars[var_name] for var_name in var_names]
                         # self.problem += lpSum(var) == 0, f"skip fixed teacher slots {var_names}, {day_index}, {slot_index}"
@@ -264,7 +264,7 @@ class StundenplanHelper:
                                 f"[{self.log_name}][FIXED Setup] skip fixed class day '{day_index}', slot '{slot_index}' class: '{class_key}' because prefilled class (teacher '{teacher_key}')")
 
                             if len(var_names_class) == 0:
-                                print("TODO TODO")
+                                print("TODO TODO setup_fixed_vars")
 
                             var_class = [self.all_vars[var_name] for var_name in var_names_class]
                             # self.problem += lpSum(var_class) == 0, f"skip teacher slots for classes {var_names_class}, {day_index}, {slot_index} {c_count}"
@@ -286,7 +286,7 @@ class StundenplanHelper:
                 var_names = get_all_vars_with_preset(self.all_var_names, day_index=day_index, class_key=class_key)
 
                 if len(var_names) == 0:
-                    print("TODO TODO")
+                    print("TODO TODO setup_constraints")
 
                 var = [self.all_vars[var_name] for var_name in var_names]
                 c1 = lpSum(
@@ -305,7 +305,7 @@ class StundenplanHelper:
                 var_names = get_all_vars_with_preset(self.all_var_names, teacher_key=teacher_key, day_index=day_index)
 
                 if len(var_names) == 0:
-                    print("TODO TODO")
+                    print("TODO TODO setup_constraints")
 
                 var = [self.all_vars[var_name] for var_name in var_names]
                 c1 = lpSum(
@@ -327,7 +327,7 @@ class StundenplanHelper:
                                                          day_index=day_index)
 
                     if len(var_names) == 0:
-                        print("TODO TODO")
+                        print("TODO TODO setup_constraints")
 
                     var = [self.all_vars[var_name] for var_name in var_names]
                     c1 = lpSum(var) <= 1, f"teacher can only teach max one subject per class at one slot {c_count}"
@@ -1002,7 +1002,7 @@ class StundenplanHelper:
         Logger.log(f"... solver finished (pass 1)")
 
         # The status of the solution is printed to the screen
-        print("Status:", LpStatus[self.problem.status])
+        Logger.debug(f"Solver status: {str(LpStatus[self.problem.status])}")
 
         if self.problem.status != 1:
             Logger.error("No solution found (round 1)")
@@ -1464,7 +1464,6 @@ excel_stundenerfassung = ExcelExtractorStundenerfassung(
 )
 excel_stundenerfassung.apply_filter_found_files_with_real_classes(excel_extractor.all_classes)
 excel_stundenerfassung.read_all()
-print("finished")
 
 #
 stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)

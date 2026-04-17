@@ -92,8 +92,8 @@ class ExcelExtractorGesamtuebersicht:
                     self.subject_name_to_key_dict[subject_obj["name"]] = None
 
             # break
-        print(f"found {len(self.all_teachers_list)} teachers")
-        print(f"found {len(self.all_classes)} classes")
+        Logger.log(f"found {len(self.all_teachers_list)} teachers")
+        Logger.log(f"found {len(self.all_classes)} classes")
         #
         # # write to json file
         # teacher_data_json = json.dumps(all_teachers_list, indent=4)
@@ -870,18 +870,18 @@ class ExcelExtractorGesamtuebersicht:
 
                     # if the value does not contain "(", ignore
                     if "(" not in value:
-                        print(f"warning: subject teacher pair does not contain '(' for class {class_name}")
+                        Logger.warn(f"subject teacher pair does not contain '(' for class {class_name}")
                         continue
 
                     subject, teacher = value.split("(")
                     teacher_key = teacher.strip(")")
 
                     if teacher_key == "":
-                        print(f"warning: teacher key is empty for subject {subject} for class {class_name}")
+                        Logger.warn(f"teacher key is empty for subject {subject} for class {class_name}")
                         continue
                     if teacher_key not in all_teachers_dict:
-                        print(
-                            f"warning: teacher key {teacher_key} not found for subject {subject} for class {class_name}")
+                        Logger.warn(
+                            f"teacher key {teacher_key} not found for subject {subject} for class {class_name}")
                         continue
 
                     subject_teacher_pair.append({"subject": subject, "teacher_key": teacher_key})

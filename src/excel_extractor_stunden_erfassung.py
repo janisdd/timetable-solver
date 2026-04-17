@@ -438,7 +438,7 @@ class ExcelExtractorStundenerfassung:
             class_key = class_obj["key"]
 
             if class_key not in self.all_soll_data_dict:
-                print(f"warning: class key '{class_key}' not found in stundenerfassung -> skipping")
+                Logger.warn(f"class key '{class_key}' not found in stundenerfassung -> skipping")
                 continue
 
             soll_data_array = self.all_soll_data_dict[class_key]
@@ -461,11 +461,11 @@ class ExcelExtractorStundenerfassung:
                     # if last_last_name == last_part:
                     #     soll_data_obj['teacher_key'] = teacher_obj['key']
                         teacher_found = True
-                        print(teacher_obj['key'])
+                        # print(teacher_obj['key'])
                         break
                 if not teacher_found:
-                    print(
-                        f"warning: teacher '{teacher_name}' from lfd. Nr. {lfd_nr} not found in teacher list -> skipping")
+                    Logger.warn(
+                        f"teacher '{teacher_name}' from lfd. Nr. {lfd_nr} not found in teacher list -> skipping")
                     soll_data_to_remove.append(soll_data_obj)
                     continue
 
@@ -483,7 +483,7 @@ class ExcelExtractorStundenerfassung:
                         break
 
                 if not subject_found:
-                    print(f"warning: subject '{soll_subject_name}' from lfd. Nr. {lfd_nr} not found in class '{class_key}' -> skipping")
+                    Logger.warn(f"warning: subject '{soll_subject_name}' from lfd. Nr. {lfd_nr} not found in class '{class_key}' -> skipping")
                     soll_data_to_remove.append(soll_data_obj)
                     continue
 

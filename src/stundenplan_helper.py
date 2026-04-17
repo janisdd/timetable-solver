@@ -825,7 +825,7 @@ class StundenplanHelper:
             for subject_info in subjects_info:
                 subject_name = subject_info["name"]
 
-                # if class_key == "'Erz24A.'" or class_key == 'Erz24A.':
+                # if class_key == "FOS24." or class_key == 'FOS24.':
                 #     print()
 
                 # SOLL for the subject e.g. 80
@@ -996,6 +996,25 @@ class StundenplanHelper:
         # solver = pulp.PULP_CBC_CMD(timeLimit=SOLVER_TIME_OUT_S, threads=SOLVER_THREADS)
         solver = pulp.PULP_CBC_CMD()
 
+        # sometimes the blacklist prevents some solutions (we leave some empty)
+        # test_var = get_all_vars_with_preset(self.all_var_names, class_key="FOS24.", subject_key="Eng",
+        #                                     teacher_key="Gen",
+        #                                     day_index=2, slot_index=1)
+        #
+        # test_vars = [self.all_vars[var_name] for var_name in test_var]
+        # _test_const = lpSum(test_vars) == 1
+        # self.problem += _test_const, f"sum, {c_count}"
+        # c_count += 1
+
+        # test_var = get_all_vars_with_preset(self.all_var_names, class_key="FOS24.", subject_key="Eng",
+        #                                     teacher_key="Gen",
+        #                                     day_index=3, slot_index=0)
+        #
+        # test_vars = [self.all_vars[var_name] for var_name in test_var]
+        # _test_const = lpSum(test_vars) == 1
+        # self.problem += _test_const, f"sum, {c_count}"
+        # c_count += 1
+
         self.problem += lpSum(all_rest_varialbes)
         Logger.log(f"Starting solver (pass 1) ...")
         self.problem.solve(solver)
@@ -1046,6 +1065,8 @@ class StundenplanHelper:
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_2.xlsm')
 
+        Logger.log("--- Notes ---")
+        Logger.log("- some slots may be empty because of teacher white/blacklists")
         Logger.log("--- Finished ---")
 
     # we want to solve the problem twice,

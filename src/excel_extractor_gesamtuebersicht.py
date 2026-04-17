@@ -1118,12 +1118,14 @@ class ExcelExtractorGesamtuebersicht:
 
                 teacher_key = None
                 subject_key = None
+                prefilled_value = None
 
                 parse_result = self.parse_plan_cell_value(cell)
 
                 if parse_result is not None:
                     teacher_key = parse_result["teacher_key"]
                     subject_key = parse_result["subject_key"]
+                    prefilled_value = parse_result["prefilled_value"]
 
                     if teacher_key is not None:
                         if teacher_key not in all_teachers_dict:
@@ -1136,10 +1138,10 @@ class ExcelExtractorGesamtuebersicht:
                                 f"[{self.log_name}] parsed plan cell value '{cell.value}' at {Logger.get_cell_full_coord(cell)}, result: teacher_key='{teacher_key}'")
 
                 day_slot_entry = {
-                    "entry": cell.value,
+                    "prefilled_value": prefilled_value,
                     "ignore": False,
                     "teacher_key": teacher_key,
-                    "subject_key": subject_key, # can still be empty if we only have a teacher e.g. (Jo) # TODO currently ignored
+                    "subject_key": subject_key, # can still be empty if we only have a teacher e.g. (Jo)
                 }
 
                 day_slots.append(day_slot_entry)
@@ -1209,7 +1211,8 @@ class ExcelExtractorGesamtuebersicht:
 
             return {
                 "subject_key": subject_key,
-                "teacher_key": teacher_key
+                "teacher_key": teacher_key,
+                "prefilled_value": raw,
             }
 
         # # If no parentheses, it might be just a teacher key without parentheses or just subject

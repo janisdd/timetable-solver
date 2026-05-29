@@ -1512,7 +1512,6 @@ Logger.set_output_file(f"{dir_prefix}/log.txt")
 
 try:
     all_overview_files = [f for f in os.listdir(dir_prefix) if ALL_OVER_VIEW_FILE_SEARCH_SUBSTRING in f]
-    mappings_file = os.path.join(dir_prefix, MAPPINGS_FILE_NAME_WITH_EXTENSION) # will be created if not existing
     existing_plan_file = [f for f in os.listdir(dir_prefix) if EXISTING_PLAN_FILE_SEARCH_SUBSTRING in f]
 
     if len(all_overview_files) == 0:
@@ -1520,10 +1519,11 @@ try:
     if len(existing_plan_file) == 0:
         raise Exception(f"No existing plan file found in {dir_prefix}, expected to find one with substring '{EXISTING_PLAN_FILE_SEARCH_SUBSTRING}'")
 
+# prefix with dir_prefix
     excel_extractor = ExcelExtractorGesamtuebersicht(
-        all_overview_files[0],
-        mappings_file[0],
-        existing_plan_file[0]
+        os.path.join(dir_prefix, all_overview_files[0]),
+        os.path.join(dir_prefix, MAPPINGS_FILE_NAME_WITH_EXTENSION), # will be created if not existing
+        os.path.join(dir_prefix, existing_plan_file[0])
     )
     excel_extractor.read_all()
 

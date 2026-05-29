@@ -2,6 +2,7 @@
 import os
 
 import openpyxl
+from openpyxl.styles import PatternFill
 
 from src.logger import Logger
 
@@ -181,28 +182,29 @@ class ExcelExtractorGesamtuebersicht:
             default_not_allowed_color = "FF0000"
             # set bg color to green
             # excel uses #aarrggbb for colors, use fgColor in fill!! (bg is for patterns)
-            ws_color_mapping.cell(row=10, column=1).fill.fgColor.rgb = default_allowed_color
-            ws_color_mapping.cell(row=11, column=1).fill.fgColor.rgb = default_allowed_color
-            ws_color_mapping.cell(row=12, column=1).fill.fgColor.rgb = default_allowed_color
-            ws_color_mapping.cell(row=13, column=1).fill.fgColor.rgb = default_allowed_color
-            ws_color_mapping.cell(row=14, column=1).fill.fgColor.rgb = default_allowed_color
-            ws_color_mapping.cell(row=15, column=1).fill.fgColor.rgb = default_allowed_color
-            ws_color_mapping.cell(row=16, column=1).fill.fgColor.rgb = default_allowed_color
-            ws_color_mapping.cell(row=17, column=1).fill.fgColor.rgb = default_allowed_color
-            ws_color_mapping.cell(row=18, column=1).fill.fgColor.rgb = default_allowed_color
-            ws_color_mapping.cell(row=19, column=1).fill.fgColor.rgb = default_allowed_color
+            # ws_color_mapping.cell(row=10, column=1).fill.fgColor.rgb = default_allowed_color # not working anymore
+            ws_color_mapping.cell(row=10, column=1).fill = PatternFill(start_color=default_allowed_color, end_color=default_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=11, column=1).fill = PatternFill(start_color=default_allowed_color, end_color=default_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=12, column=1).fill = PatternFill(start_color=default_allowed_color, end_color=default_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=13, column=1).fill = PatternFill(start_color=default_allowed_color, end_color=default_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=14, column=1).fill = PatternFill(start_color=default_allowed_color, end_color=default_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=15, column=1).fill = PatternFill(start_color=default_allowed_color, end_color=default_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=16, column=1).fill = PatternFill(start_color=default_allowed_color, end_color=default_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=17, column=1).fill = PatternFill(start_color=default_allowed_color, end_color=default_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=18, column=1).fill = PatternFill(start_color=default_allowed_color, end_color=default_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=19, column=1).fill = PatternFill(start_color=default_allowed_color, end_color=default_allowed_color, fill_type = "solid")
 
             # not allowed
-            ws_color_mapping.cell(row=20, column=1).fill.fgColor.rgb = default_not_allowed_color
-            ws_color_mapping.cell(row=21, column=1).fill.fgColor.rgb = "C91BBD"
-            ws_color_mapping.cell(row=22, column=1).fill.fgColor.rgb = "F7C7AC"
-            ws_color_mapping.cell(row=23, column=1).fill.fgColor.rgb = "FF5050"
-            ws_color_mapping.cell(row=24, column=1).fill.fgColor.rgb = "C00000"
-            ws_color_mapping.cell(row=25, column=1).fill.fgColor.rgb = "FF6600"
-            ws_color_mapping.cell(row=26, column=1).fill.fgColor.rgb = default_not_allowed_color
-            ws_color_mapping.cell(row=27, column=1).fill.fgColor.rgb = default_not_allowed_color
-            ws_color_mapping.cell(row=28, column=1).fill.fgColor.rgb = default_not_allowed_color
-            ws_color_mapping.cell(row=29, column=1).fill.fgColor.rgb = default_not_allowed_color
+            ws_color_mapping.cell(row=20, column=1).fill = PatternFill(start_color=default_not_allowed_color, end_color=default_not_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=21, column=1).fill = PatternFill(start_color="C91BBD", end_color="C91BBD", fill_type = "solid")
+            ws_color_mapping.cell(row=22, column=1).fill = PatternFill(start_color="F7C7AC", end_color="F7C7AC", fill_type = "solid")
+            ws_color_mapping.cell(row=23, column=1).fill = PatternFill(start_color="FF5050", end_color="FF5050", fill_type = "solid")
+            ws_color_mapping.cell(row=24, column=1).fill = PatternFill(start_color="C00000", end_color="C00000", fill_type = "solid")
+            ws_color_mapping.cell(row=25, column=1).fill = PatternFill(start_color="FF6600", end_color="FF6600", fill_type = "solid")
+            ws_color_mapping.cell(row=26, column=1).fill = PatternFill(start_color=default_not_allowed_color, end_color=default_not_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=27, column=1).fill = PatternFill(start_color=default_not_allowed_color, end_color=default_not_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=28, column=1).fill = PatternFill(start_color=default_not_allowed_color, end_color=default_not_allowed_color, fill_type = "solid")
+            ws_color_mapping.cell(row=29, column=1).fill = PatternFill(start_color=default_not_allowed_color, end_color=default_not_allowed_color, fill_type = "solid")
 
             some_changed = True
         else:
@@ -228,10 +230,10 @@ class ExcelExtractorGesamtuebersicht:
             curr_row = 10
 
             for class_obj in all_classes:
-                class_key = class_obj['key']
                 class_name_parts = class_obj['name_fields']
                 for i, part in enumerate(class_name_parts):
-                    ws_class_mapping.cell(row=curr_row, column=1 + i).value = part
+                    # 2 = B
+                    ws_class_mapping.cell(row=curr_row, column=2 + i).value = part
 
                 curr_row += 1
 
@@ -356,7 +358,7 @@ class ExcelExtractorGesamtuebersicht:
         not_allowed_colors = set()
 
         for i in range(max_num_colors):
-            mapping_allowed_cell = ws_color_legend.cell(row=mapping_allowed_row_start + i - 1, column=1)
+            mapping_allowed_cell = ws_color_legend.cell(row=mapping_allowed_row_start + i, column=1)
             allowed_color = self.get_cell_color(mapping_allowed_cell)
             allowed_colors.add(allowed_color)
 
@@ -364,12 +366,12 @@ class ExcelExtractorGesamtuebersicht:
 
         # in individual teachers sheets
         for i in range(max_num_colors):
-            mapping_allowed_cell = ws_color_legend.cell(row=mapping_not_allowed_row_start + i - 1, column=1)
+            mapping_allowed_cell = ws_color_legend.cell(row=mapping_not_allowed_row_start + i, column=1)
             not_allowed_color = self.get_cell_color(mapping_allowed_cell)
             not_allowed_colors.add(not_allowed_color)
 
-        Logger.debug(f"[{MAPPINGS_SHEET_COLORS}] allowed colors: {allowed_colors}")
-        Logger.debug(f"[{MAPPINGS_SHEET_COLORS}] not allowed colors: {not_allowed_colors}")
+        Logger.debug(f"[{self.log_name}][{MAPPINGS_SHEET_COLORS}] allowed colors: {allowed_colors}")
+        Logger.debug(f"[{self.log_name}][{MAPPINGS_SHEET_COLORS}] not allowed colors: {not_allowed_colors}")
 
         return {
             "allowed_bg_colors_set": allowed_colors,

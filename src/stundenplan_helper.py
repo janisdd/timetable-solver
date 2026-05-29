@@ -1,3 +1,4 @@
+import os
 from pulp import *
 from tabulate import tabulate
 
@@ -10,6 +11,9 @@ SOLVER_THREADS=4
 MAX_SUBJ_PER_DAY=1
 
 MAPPINGS_FILE_NAME_WITH_EXTENSION = "Mappings.xlsx"
+ALL_OVER_VIEW_FILE_SEARCH_SUBSTRING = "Gesamtübersicht"
+EXISTING_PLAN_FILE_SEARCH_SUBSTRING = "_KW"
+
 
 SLOT_MULTIPLIER = 1
 if ONLY_USE_BLOCKS_OF_TWO:
@@ -1473,30 +1477,71 @@ def get_stundenplan_tuples_from_vars(stundenplanHelper):
     return all_class_timetables
 
 
-# TODO output to new file
-excel_extractor = ExcelExtractorGesamtuebersicht(
-    'example_real/SJ 25-26_Gesamtübersicht Einsatz Lehrkräfte EA Halle 2025-05-21_3.xlsx',
-    "example_real/Mappings.xlsx",
-    'example_real/03_KW 10_02.03.-06.03.2026_gesetzteverpflichtende Stunden drin ohne Reste aus Vorwoche_IN.xlsm'
-)
-excel_extractor.read_all()
+# excel_extractor = ExcelExtractorGesamtuebersicht(
+#     'example_real/SJ 25-26_Gesamtübersicht Einsatz Lehrkräfte EA Halle 2025-05-21_3.xlsx',
+#     "example_real/Mappings.xlsx",
+#     'example_real/03_KW 10_02.03.-06.03.2026_gesetzteverpflichtende Stunden drin ohne Reste aus Vorwoche_IN.xlsm'
+# )
+# excel_extractor.read_all()
 
-excel_stundenerfassung = ExcelExtractorStundenerfassung(
-    "example_real/",
-)
-excel_stundenerfassung.apply_filter_found_files_with_real_classes(excel_extractor.all_classes)
-excel_stundenerfassung.read_all()
+# excel_stundenerfassung = ExcelExtractorStundenerfassung(
+#     "example_real/",
+# )
+# excel_stundenerfassung.apply_filter_found_files_with_real_classes(excel_extractor.all_classes)
+# excel_stundenerfassung.read_all()
 
-#
-stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)
-# stundenplaner.read_excel_data()
-# stundenplaner.read_excel_stundenerfassung()
-# stundenplaner.prepare_excel_data()
-stundenplaner.init_new_timetable_problem()
-stundenplaner.setup_fixed_vars()
-stundenplaner.setup_constraints()
-# stundenplaner.solve_timetable_problem()
-# stundenplaner.solve_timetable_problem_3()
-stundenplaner.solve_timetable_problem_4()
+# #
+# stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)
+# # stundenplaner.read_excel_data()
+# # stundenplaner.read_excel_stundenerfassung()
+# # stundenplaner.prepare_excel_data()
+# stundenplaner.init_new_timetable_problem()
+# stundenplaner.setup_fixed_vars()
+# stundenplaner.setup_constraints()
+# # stundenplaner.solve_timetable_problem()
+# # stundenplaner.solve_timetable_problem_3()
+# stundenplaner.solve_timetable_problem_4()
+
+# # stundenplaner.write_timetable_solution_to_excel('example/07_KW 45_03.11.-07.11.2025_OUT.xlsm')
+
+#######################################################################
+
+dir_prefix = "Tabellen"
+
+Logger.set_output_file(f"{dir_prefix}/log.txt")
+
+try:
+    all_overview_files = [f for f in os.listdir(dir_prefix) if ALL_OVER_VIEW_FILE_SEARCH_SUBSTRING in f]
+    mappings_file = os.path.join(dir_prefix, MAPPINGS_FILE_NAME_WITH_EXTENSION) # will be created if not existing
+    existing_plan_file = [f for f in os.listdir(dir_prefix) if EXISTING_PLAN_FILE_SEARCH_SUBSTRING in f]
+
+    if len(all_overview_files) == 0:
+        raise Exception(f"No overview files found in {dir_prefix}, expected to find one with substring '{ALL_OVER_VIEW_FILE_SEARCH_SUBSTRING}'")
+    if len(existing_plan_file) == 0:
+        raise Exception(f"No existing plan file found in {dir_prefix}, expected to find one with substring '{EXISTING_PLAN_FILE_SEARCH_SUBSTRING}'")
+
+    excel_extractor = ExcelExtractorGesamtuebersicht(
+        all_overview_files[0],
+        mappings_file[0],
+        existing_plan_file[0]
+    )
+    excel_extractor.read_all()
+
+    excel_stundenerfassung = ExcelExtractorStundenerfassung(
+        dir_prefix,
+    )
+    excel_stundenerfassung.apply_filter_found_files_with_real_classes(excel_extractor.all_classes)
+    excel_stundenerfassung.read_all()
+
+    stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung)
+    stundenplaner.init_new_timetable_problem()
+    stundenplaner.setup_fixed_vars()
+    stundenplaner.setup_constraints()
+    stundenplaner.solve_timetable_problem_4()
+
+except Exception as e:
+    raise e
+finally:
+    Logger.close_output_file()
 
 # stundenplaner.write_timetable_solution_to_excel('example/07_KW 45_03.11.-07.11.2025_OUT.xlsm')

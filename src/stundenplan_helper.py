@@ -1,4 +1,11 @@
 import os
+import sys
+from pathlib import Path
+
+# Allow `python3 src/stundenplan_helper.py` from the project root.
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from pulp import *
 from tabulate import tabulate
 

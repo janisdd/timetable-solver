@@ -114,8 +114,9 @@ class ExcelExtractorStundenerfassung:
         for _tuple in excel_files_to_ignore:
             self.all_excel_files_stundenerfassungen.remove(_tuple)
 
-        throw_if_excel_file_not_found = False
-        print("TODO throw_if_excel_file_not_found!!!!!!!!!!!")
+        throw_if_excel_file_not_found = True
+        Logger.warn(f"throw_if_excel_file_not_found is set to {throw_if_excel_file_not_found} (if true: every class needs a matching Std Erfassung file else we throw)")
+        # print("TODO throw_if_excel_file_not_found!!!!!!!!!!!")
 
         if error_count > 0:
             if throw_if_excel_file_not_found:
@@ -174,6 +175,7 @@ class ExcelExtractorStundenerfassung:
 
         # in case there are multiple entries for the same teacher and subject --> error
         used_teacher_subject_pairs = set()
+        error_count = 0
 
         for curr_year_index in range(len(YEAR_COLUMN_INDICES)-1, -1, -1):
             curr_soll_data_array = []
@@ -193,7 +195,6 @@ class ExcelExtractorStundenerfassung:
 
             curr_nr_cell_value = -1
 
-            error_count = 0
 
             while curr_nr_cell_value is not None:
 
@@ -423,8 +424,8 @@ class ExcelExtractorStundenerfassung:
 
         if error_count > 0:
             Logger.error(f"[{self.log_name}][Stundenerfassung][{class_key}] {error_count} errors found while reading stundenerfassung for class '{class_key}', see previous error messages for details")
-            print("TODO enable error")
-            # raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] {error_count} errors found while reading stundenerfassung for class '{class_key}', see previous error messages for details")
+            # print("TODO enable error")
+            raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] {error_count} errors found while reading stundenerfassung for class '{class_key}', see previous error messages for details")
 
         return {
             "class_key": class_key,

@@ -248,6 +248,7 @@ class ExcelExtractorGesamtuebersicht:
             ws_subjects_mapping = wb_mappings.create_sheet("fächer")
 
             ws_subjects_mapping.cell(row=1, column=1).value = 'Der Fach Name ist der volle Name aus der Gesamtübersicht'
+            ws_subjects_mapping.cell(row=2, column=1).value = 'Das Fach Kürzel wird für die Ausgabe in den Stundenplänen genutzt'
 
             ws_subjects_mapping.cell(row=9, column=1).value = 'Fach Kürzel'
             ws_subjects_mapping.cell(row=9, column=2).value = 'Fach Name'
@@ -654,7 +655,6 @@ class ExcelExtractorGesamtuebersicht:
             if class_obj['name_single_line'].strip() == 'Erzieher':
                 Logger.warn(
                     f"[{self.log_name}] [{ws.title}] class '{curr_class.value}' special case because merged cell is wrong ...")
-                # print("TODO 'Erzieher ' ...")
                 curr_class = ws.cell(row=start_row, column=range_class_name[2] + 2)
             else:
                 curr_class = ws.cell(row=start_row, column=range_class_name[2] + 1)

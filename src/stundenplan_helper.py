@@ -9,6 +9,7 @@ SOLVER_TIME_OUT_S = 120
 SOLVER_THREADS=4
 MAX_SUBJ_PER_DAY=1
 
+MAPPINGS_FILE_NAME_WITH_EXTENSION = "Mappings.xlsx"
 
 SLOT_MULTIPLIER = 1
 if ONLY_USE_BLOCKS_OF_TWO:
@@ -503,20 +504,20 @@ class StundenplanHelper:
         solver = pulp.PULP_CBC_CMD(timeLimit=SOLVER_TIME_OUT_S, threads=SOLVER_THREADS)
 
         self.problem += lpSum(all_rest_varialbes) + lpSum(all_diff_vars)
-        Logger.log(f"Starting solver (pass 1) ...")
+        Logger.log(f"[{self.log_name}] Starting solver (pass 1) ...")
         self.problem.solve(solver)
-        Logger.log(f"... solver finished (pass 1)")
+        Logger.log(f"[{self.log_name}] ... solver finished (pass 1)")
 
         # The status of the solution is printed to the screen
         print("Status:", LpStatus[self.problem.status])
 
         if self.problem.status != 1:
-            Logger.error("No solution found (round 1)")
+            Logger.error(f"[{self.log_name}] No solution found (round 1)")
             exit()
 
-        Logger.log("--- START Solution Stats (round 1) ---")
+        Logger.log(f"[{self.log_name}] --- START Solution Stats (round 1) ---")
         self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup, None)
-        Logger.log("--- END Solution Stats (round 1) ---")
+        Logger.log(f"[{self.log_name}] --- END Solution Stats (round 1) ---")
 
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_1.xlsm')
@@ -539,7 +540,7 @@ class StundenplanHelper:
         # print("Status:", LpStatus[self.problem.status])
 
         if self.problem.status != 1:
-            Logger.error("No solution found (round 2)")
+            Logger.error(f"[{self.log_name}] No solution found (round 2)")
             exit()
 
         # # Each of the variables is printed with it's resolved optimum value
@@ -707,20 +708,20 @@ class StundenplanHelper:
         solver = pulp.PULP_CBC_CMD()
 
         self.problem += lpSum(all_rest_varialbes)
-        Logger.log(f"Starting solver (pass 1) ...")
+        Logger.log(f"[{self.log_name}] Starting solver (pass 1) ...")
         self.problem.solve(solver)
-        Logger.log(f"... solver finished (pass 1)")
+        Logger.log(f"[{self.log_name}] ... solver finished (pass 1)")
 
         # The status of the solution is printed to the screen
-        print("Status:", LpStatus[self.problem.status])
+        Logger.log(f"[{self.log_name}] Status: {LpStatus[self.problem.status]}")
 
         if self.problem.status != 1:
-            Logger.error("No solution found (round 1)")
+            Logger.error(f"[{self.log_name}] No solution found (round 1)")
             exit()
 
-        Logger.log("--- START Solution Stats (round 1) ---")
+        Logger.log(f"[{self.log_name}] --- START Solution Stats (round 1) ---")
         self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup, None)
-        Logger.log("--- END Solution Stats (round 1) ---")
+        Logger.log(f"[{self.log_name}] --- END Solution Stats (round 1) ---")
 
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_1.xlsm')
@@ -767,17 +768,17 @@ class StundenplanHelper:
         Logger.log(f"[{self.log_name}] ... solver finished (pass 2)")
 
         if self.problem.status != 1:
-            Logger.error("No solution found (round 2)")
+            Logger.error(f"[{self.log_name}] No solution found (round 2)")
             exit()
 
-        Logger.log("--- START Solution Stats (round 2) ---")
+        Logger.log(f"[{self.log_name}] --- START Solution Stats (round 2) ---")
         self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup, fixed_var_variables_set)
-        Logger.log("--- END Solution Stats (round 2) ---")
+        Logger.log(f"[{self.log_name}] --- END Solution Stats (round 2) ---")
 
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_2.xlsm')
 
-        print("end")
+        Logger.log(f"[{self.log_name}] ALL FINISHED")
 
 
         # # because we try to minimize the differences
@@ -1016,20 +1017,20 @@ class StundenplanHelper:
         # c_count += 1
 
         self.problem += lpSum(all_rest_varialbes)
-        Logger.log(f"Starting solver (pass 1) ...")
+        Logger.log(f"[{self.log_name}] Starting solver (pass 1) ...")
         self.problem.solve(solver)
-        Logger.log(f"... solver finished (pass 1)")
+        Logger.log(f"[{self.log_name}] ... solver finished (pass 1)")
 
         # The status of the solution is printed to the screen
-        Logger.debug(f"Solver status: {str(LpStatus[self.problem.status])}")
+        Logger.debug(f"[{self.log_name}] Solver status: {str(LpStatus[self.problem.status])}")
 
         if self.problem.status != 1:
-            Logger.error("No solution found (round 1)")
+            Logger.error("[{self.log_name}] No solution found (round 1)")
             exit()
 
-        Logger.log("--- START Solution Stats (round 1) ---")
+        Logger.log(f"[{self.log_name}] --- START Solution Stats (round 1) ---")
         self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup, None)
-        Logger.log("--- END Solution Stats (round 1) ---")
+        Logger.log(f"[{self.log_name}] --- END Solution Stats (round 1) ---")
 
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_1.xlsm')
@@ -1055,19 +1056,19 @@ class StundenplanHelper:
         Logger.log(f"[{self.log_name}] ... solver finished (pass 2)")
 
         if self.problem.status != 1:
-            Logger.error("No solution found (round 2)")
+            Logger.error(f"[{self.log_name}] No solution found (round 2)")
             exit()
 
-        Logger.log("--- START Solution Stats (round 2) ---")
+        Logger.log(f"[{self.log_name}] --- START Solution Stats (round 2) ---")
         self.print_solution_stats(self.problem, stats_for_after_sol, vars_name_to_r_var_lookup, fixed_var_variables_set)
-        Logger.log("--- END Solution Stats (round 2) ---")
+        Logger.log(f"[{self.log_name}] --- END Solution Stats (round 2) ---")
 
         all_class_timetables_tuples = get_stundenplan_tuples_from_vars(self)
         self.write_timetable_solution_to_excel(all_class_timetables_tuples, 'example_real/OUT_round_2.xlsm')
 
-        Logger.log("--- Notes ---")
-        Logger.log("- some slots may be empty because of teacher white/blacklists")
-        Logger.log("--- Finished ---")
+        Logger.log(f"[{self.log_name}] --- Notes ---")
+        Logger.log(f"[{self.log_name}] - some slots may be empty because of teacher white/blacklists")
+        Logger.log(f"[{self.log_name}] --- Finished ---")
 
     # we want to solve the problem twice,
     # first try to reduce all differences between missing hours
@@ -1142,7 +1143,7 @@ class StundenplanHelper:
             else:
                 new_ist = sum_ist_hours_teacher + filled_slots_count
 
-            message = f"[{self.log_name}][SOL] class '{class_key}' subject '{subject_name}({teacher_key})' old {sum_ist_hours_teacher}/{soll_hours_term}, new: {new_ist}/{soll_hours_term} (filled {filled_slots_count} new slots)"
+            message = f"class '{class_key}' subject '{subject_name}({teacher_key})' old {sum_ist_hours_teacher}/{soll_hours_term}, new: {new_ist}/{soll_hours_term} (filled {filled_slots_count} new slots)"
 
             if class_key not in grouped_by_class:
                 grouped_by_class[class_key] = []
@@ -1151,7 +1152,7 @@ class StundenplanHelper:
 
         for group, messages in grouped_by_class.items():
             for message in messages:
-                Logger.log(message)
+                Logger.log(f"[{self.log_name}][SOL] {message}")
 
 
     def solve_timetable_problem(self):

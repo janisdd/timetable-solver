@@ -37,3 +37,7 @@ ERROR: teacher 'Wü' [Steffen Wünsch] has pref for unknown class 'PT.' on day '
 
 Erzieher in ERZ VZ 25_26 merge ist nicht ganz vollständig...
 
+
+--------------------------------------------------------------
+
+mapping neue spalte, damit klasse ignoriert wird bei strd übersicht

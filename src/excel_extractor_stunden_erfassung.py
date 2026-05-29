@@ -114,7 +114,7 @@ class ExcelExtractorStundenerfassung:
         for _tuple in excel_files_to_ignore:
             self.all_excel_files_stundenerfassungen.remove(_tuple)
 
-        throw_if_excel_file_not_found = True
+        throw_if_excel_file_not_found = False
         Logger.warn(f"throw_if_excel_file_not_found is set to {throw_if_excel_file_not_found} (if true: every class needs a matching Std Erfassung file else we throw)")
         # print("TODO throw_if_excel_file_not_found!!!!!!!!!!!")
 

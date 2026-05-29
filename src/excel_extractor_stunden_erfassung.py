@@ -62,8 +62,8 @@ class ExcelExtractorStundenerfassung:
             Logger.log(f"[{self.log_name}] found Std Erfassung file for class '{class_name}': {excel_full_path}")
 
             # for some reason the class name/key ends with a '.', ensure that
-            # if not class_name.endswith("."):
-            #     class_name += "."
+            if not class_name.endswith("."):
+                class_name += "."
 
             excel_files_tuples.append((excel_full_path, class_name.upper().strip()))
 

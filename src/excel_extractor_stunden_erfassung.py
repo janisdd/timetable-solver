@@ -9,6 +9,8 @@ STD_ERFASSUNG_FILE_PREFIX_LOWER = "std-erfassung_"
 
 SHEET_HOURS_OVERVIEW = 'LehrerStundenübersicht'
 
+ALL_OVERVIEW_NAME = "Gesamtübersicht"
+
 # index of soll year X
 # we expect +2 to be the current akkum hours
 YEAR_COLUMN_INDICES = [5, 10, 15, 20]
@@ -28,7 +30,7 @@ class ExcelExtractorStundenerfassung:
             self.dir_excel_files_stundenerfassung
         )
 
-        self.all_excel_files_with_class_obj = []
+        self.all_excel_std_files_with_class_obj = []
 
 
     def _get_all_std_erfassung_files(self, directory):
@@ -90,7 +92,7 @@ class ExcelExtractorStundenerfassung:
                     found_std_erfassung = True
                     used_excel_files_stundenerfassungen_class_names.add(class_key.upper())
                     Logger.log(f"[{self.log_name}][FILTERING] found matching Std Erfassung file for class '{class_key}': {excel_file_path}")
-                    self.all_excel_files_with_class_obj.append({
+                    self.all_excel_std_files_with_class_obj.append({
                         "class_obj": class_obj,
                         "excel_file_path": excel_file_path,
                     })
@@ -127,25 +129,36 @@ class ExcelExtractorStundenerfassung:
                     all_classes.remove(class_obj)
                     Logger.warn(f"[{self.log_name}][FILTERING] class '{class_obj['key']}' removed from all_classes because no matching Std Erfassung file was found")
 
-    def read_all(self):
+    def read_all(self, ignore_errors_in_std_files):
 
-        if len(self.all_excel_files_with_class_obj) == 0:
-            raise Exception(f"[{self.log_name}] call apply_filter_found_files_with_real_classes first")
+        some_has_error = False
 
-        for obj in self.all_excel_files_with_class_obj:
+        if len(self.all_excel_std_files_with_class_obj) == 0:
+            raise Exception(f"[{self.log_name}] no 'std erfassung' files found! (maybe call apply_filter_found_files_with_real_classes first?)")
+
+        for obj in self.all_excel_std_files_with_class_obj:
             class_obj = obj["class_obj"]
             excel_file_path = obj["excel_file_path"]
 
-            stundenerfassung_obj = self.read_single_stundenerfassung(excel_file_path, class_obj)
+            stundenerfassung_obj, has_error = self.read_single_stundenerfassung(excel_file_path, class_obj, ignore_errors_in_std_files)
+
+            if has_error:
+                some_has_error = True
 
             self.all_soll_data_dict[stundenerfassung_obj["class_key"]] = stundenerfassung_obj["soll_data_array"]
 
         # we are only allowed to write to "PLAN" sheet
-        Logger.log(f"finished reading stundenerfassung excel files")
+        Logger.log(f"[{self.log_name}][STUNDERFASSUNG] finished reading stundenerfassung excel files")
 
-    def read_single_stundenerfassung(self, excel_files_stundenerfassung_path, class_obj):
+        if some_has_error and not ignore_errors_in_std_files:
+            raise Exception(f"[{self.log_name}][STUNDERFASSUNG] some 'std erfassung' files have errors, fix them")
+
+
+    def read_single_stundenerfassung(self, excel_files_stundenerfassung_path, class_obj, ignore_errors_in_std_files):
         workbook = openpyxl.load_workbook(excel_files_stundenerfassung_path, read_only=False, data_only=True)
         ws = workbook[SHEET_HOURS_OVERVIEW]
+
+        Logger.log(f"[{self.log_name}][STUNDERFASSUNG] loading 'std erfassung' excel file for class '{class_obj['key']}' from path: {excel_files_stundenerfassung_path}")
 
         def find_teacher_in_class_subjects(teacher_key, class_obj):
             teacher_with_hours_subject_tuples = []
@@ -178,230 +191,316 @@ class ExcelExtractorStundenerfassung:
         error_count = 0
 
         for curr_year_index in range(len(YEAR_COLUMN_INDICES)-1, -1, -1):
-            curr_soll_data_array = []
-            # we need to determine the correct year index
-            # try all years (1-4) and start with the last one
-            # if we find at least one entry with != 0 or None entry, then this is the correct year/column
 
-            lfd_nr_col = 1  # A just some number
-            subject_col = 27 # AA
-            # teacher_key_col = 3 # C
-            # name_col = 4  # D
-            teacher_subject_pair_col = 3  # C
+            # when we can't find the correct subject, output what other subjects the teacher has
+            #   (and where in the std erfassung table)
+            # entries are also dicts with subject names (so we don't add duplicates in round 2)
+            teacher_with_subjects_coords_dict = dict()
 
-            start_row = 33
-            soll_start_col = self.year_columns[curr_year_index]
-            curr_row = start_row - 1
+            for round in [0,1]:
+                Logger.debug(f"[{self.log_name}][Stundenerfassung][{class_key}] --- round {round+1}")
+                error_count = 0
+                used_teacher_subject_pairs = set()
+                # in the first round we read all lines and try to get the data
+                #  we need two rounds because we read from top to bottom and
+                #  if e.g. a teacher has 2 subjects and we can auto-detect one of it
+                #  but the not auto-detectable comes frist we would give an error
+                #  however, after we processed the auto-detectable one,
+                #  we can auto-process the second one
+                is_first_round = True if round == 0 else False
+                is_second_round = not is_first_round
 
-            curr_nr_cell_value = -1
+                curr_soll_data_array = []
+                # we need to determine the correct year index
+                # try all years (1-4) and start with the last one
+                # if we find at least one entry with != 0 or None entry, then this is the correct year/column
 
+                lfd_nr_col = 1  # A just some number
+                subject_col = 27 # AA
+                # teacher_key_col = 3 # C
+                # name_col = 4  # D
+                teacher_subject_pair_col = 3  # C
 
-            while curr_nr_cell_value is not None:
+                start_row = 33
+                soll_start_col = self.year_columns[curr_year_index]
+                curr_row = start_row - 1
 
-                curr_row += 1
-                curr_nr_cell = ws.cell(row=curr_row, column=lfd_nr_col)
-
-                # print(curr_nr_cell.value)
-                lfd_nr_value = curr_nr_cell.value
-                curr_nr_cell_value = curr_nr_cell.value
-
-                if curr_nr_cell_value is None:
-                    break
-
-                soll_cell = ws.cell(row=curr_row, column=soll_start_col)
-
-                soll_per_week_cell = ws.cell(row=curr_row, column=soll_start_col + 1)
-                soll_per_week_value = soll_per_week_cell.value
-
-                # soll x. jahr
-                soll_value = soll_cell.value
-                # ist akkum x. jahr
-                ist_akkum_value = ws.cell(row=curr_row, column=soll_start_col + 2).value
-
-                # this teacher has no hours in this year
-                if soll_value is None or soll_value == "" or soll_value == 0:
-                    continue
-
-                # akt. Soll WS 2. Jahr
-                # this many hours per week are needed to meet the target hours
-                curr_soll_per_week_cell = ws.cell(row=curr_row, column=soll_start_col + 4)
-                curr_soll_per_week_value = curr_soll_per_week_cell.value
+                curr_nr_cell_value = -1
 
 
-                # only log once
-                if not found_correct_year_index:
-                    Logger.log(
-                        f"[{self.log_name}][Stundenerfassung][{class_key}] --- found correct year column index: {curr_year_index} (column {soll_cell.column_letter} [index {self.year_columns[correct_year_index]}])")
+                while curr_nr_cell_value is not None:
 
-                found_correct_year_index = True
-                correct_year_index = curr_year_index
+                    curr_row += 1
+                    curr_nr_cell = ws.cell(row=curr_row, column=lfd_nr_col)
 
-                if soll_per_week_value == 0 or soll_per_week_value == 0.0:
-                    Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll per week' is 0 for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_per_week_cell)}' -> this should not happen, please check if the soll per week value is correct, using 0.01 as default")
-                    soll_per_week_value = 0.01
+                    # print(curr_nr_cell.value)
+                    lfd_nr_value = curr_nr_cell.value
+                    curr_nr_cell_value = curr_nr_cell.value
 
-                if type(curr_soll_per_week_value) != float and type(curr_soll_per_week_value) != int:
-                    # Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll per week' is not a number(float) for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_per_week_cell)}', value: {soll_per_week_value} -> this should not happen, please check if the soll per week value is correct")
-                    raise Exception(
-                        f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll per week' is not a number(float) for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_per_week_cell)}', value: {soll_per_week_value} -> this should not happen, please check if the soll per week value is correct")
+                    if curr_nr_cell_value is None:
+                        break
 
-                # teacher_name_value = ws.cell(row=curr_row, column=name_col).value
-                # abkürzung
-                teacher_subject_pair_cell = ws.cell(row=curr_row, column=teacher_subject_pair_col)
-                teacher_subject_pair_value = teacher_subject_pair_cell.value
+                    soll_cell = ws.cell(row=curr_row, column=soll_start_col)
+
+                    soll_per_week_cell = ws.cell(row=curr_row, column=soll_start_col + 1)
+                    soll_per_week_value = soll_per_week_cell.value
+
+                    # soll x. jahr
+                    soll_value = soll_cell.value
+                    # ist akkum x. jahr
+                    ist_akkum_value = ws.cell(row=curr_row, column=soll_start_col + 2).value
+
+                    # this teacher has no hours in this year
+                    if soll_value is None or soll_value == "" or soll_value == 0:
+                        continue
+
+                    # akt. Soll WS 2. Jahr
+                    # this many hours per week are needed to meet the target hours
+                    curr_soll_per_week_cell = ws.cell(row=curr_row, column=soll_start_col + 4)
+                    curr_soll_per_week_value = curr_soll_per_week_cell.value
 
 
-                subject_name_cell = ws.cell(row=curr_row, column=subject_col)
-                subject_name_value = subject_name_cell.value
+                    # only log once
+                    if not found_correct_year_index:
+                        Logger.log(
+                            f"[{self.log_name}][Stundenerfassung][{class_key}] --- found correct year column index: {curr_year_index} (column {soll_cell.column_letter} [index {self.year_columns[correct_year_index]}])")
 
-                if subject_name_value is not None and type(subject_name_value) != str:
-                    raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] subject name must be a string, cell: {Logger.get_cell_full_coord(subject_name_cell)}, value: {subject_name_value}")
+                    found_correct_year_index = True
+                    correct_year_index = curr_year_index
+
+                    if soll_per_week_value == 0 or soll_per_week_value == 0.0:
+                        if is_second_round:
+                            Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll per week' is 0 for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_per_week_cell)}' -> this should not happen, please check if the soll per week value is correct, using 0.01 as default")
+                        soll_per_week_value = 0.01
+
+                    if type(curr_soll_per_week_value) != float and type(curr_soll_per_week_value) != int and is_second_round:
+                        # Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll per week' is not a number(float) for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_per_week_cell)}', value: {soll_per_week_value} -> this should not happen, please check if the soll per week value is correct")
+                        raise Exception(
+                            f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll per week' is not a number(float) for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_per_week_cell)}', value: {soll_per_week_value} -> this should not happen, please check if the soll per week value is correct")
+
+                    # teacher_name_value = ws.cell(row=curr_row, column=name_col).value
+                    # abkürzung
+                    teacher_subject_pair_cell = ws.cell(row=curr_row, column=teacher_subject_pair_col)
+                    teacher_subject_pair_value = teacher_subject_pair_cell.value
 
 
-                # try to extract the teacher from teacher_subject_pair_value value
-                # e.g. Ma(Wind)
-                teacher_start = teacher_subject_pair_value.find("(")
-                teacher_end = teacher_subject_pair_value.rfind(")")
-                teacher_key = teacher_subject_pair_value[teacher_start+1:teacher_end]
-                maybe_subject_name = teacher_subject_pair_value[:teacher_start].strip()
+                    subject_name_cell = ws.cell(row=curr_row, column=subject_col)
+                    subject_name_value = subject_name_cell.value
 
-                if type(teacher_key) != str:
-                    raise Exception(
-                        f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key must be a string (in teacher + subject cell), cell: {Logger.get_cell_full_coord(teacher_subject_pair_cell)}, value: {teacher_subject_pair_value}")
+                    if subject_name_value is not None and type(subject_name_value) != str:
+                        raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] subject name must be a string, cell: {Logger.get_cell_full_coord(subject_name_cell)}, value: {subject_name_value}")
 
-                # teacher can have multiple subjects in this class
-                teacher_with_hours_subject_tuples = find_teacher_in_class_subjects(teacher_key, class_obj)
 
-                correct_subject_obj = None
+                    # try to extract the teacher from teacher_subject_pair_value value
+                    # e.g. Ma(Wind)
+                    teacher_start = teacher_subject_pair_value.find("(")
+                    teacher_end = teacher_subject_pair_value.rfind(")")
+                    teacher_key = teacher_subject_pair_value[teacher_start+1:teacher_end]
+                    maybe_subject_name = teacher_subject_pair_value[:teacher_start].strip()
 
-                if len(teacher_with_hours_subject_tuples) == 0:
-                    # teacher not found in subjects -> error
-                    Logger.error(f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] not found in class subjects -> PLEASE FIX teacher key at cell: '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}', IGNORING TEACHER")
-                    need_to_log_all_teacher_names_in_class = True
-                    error_count += 1
-                    continue
+                    if type(teacher_key) != str:
+                        raise Exception(
+                            f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key must be a string (in teacher + subject cell), cell: {Logger.get_cell_full_coord(teacher_subject_pair_cell)}, value: {teacher_subject_pair_value}")
 
-                elif len(teacher_with_hours_subject_tuples) == 1:
-                    # this is good, we found the correct teacher and subject
-                    correct_teacher_with_hours = teacher_with_hours_subject_tuples[0][0]
-                    correct_subject_obj = teacher_with_hours_subject_tuples[0][1]
+                    # teacher can have multiple subjects in this class
+                    teacher_with_hours_subject_tuples = find_teacher_in_class_subjects(teacher_key, class_obj)
 
-                    if subject_name_value is None:
-                        # subject_name_cell.value = correct_subject_obj['name'].strip() # no need to make it explicit if it's distinct
-                        # need_to_save_wb = True
-                        subject_name_value = correct_subject_obj['name'].strip()
-                    else:
-                        # check if correct, if not -> fix
-                        if subject_name_value.strip() != correct_subject_obj['name'].strip():
-                            Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] subject name '{subject_name_value}' does not match the (correct by teacher and class) subject '{correct_subject_obj['name']}' found for teacher key '{teacher_key}' in class '{class_key}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> OVERWRITING FOR YOU")
-                            subject_name_cell.value = correct_subject_obj['name']
-                            need_to_save_wb = True
+                    if is_first_round:
+                        if teacher_key not in teacher_with_subjects_coords_dict:
+                            teacher_with_subjects_coords_dict[teacher_key] = dict()
 
-                    Logger.log(f"[{self.log_name}][Stundenerfassung][{class_key}] found correct teacher key '{teacher_key}' with subject '{correct_subject_obj['name']}' for teacher + subject pair value '{teacher_subject_pair_value}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' (from overview table this class has only this teacher for this subject)  -> using this subject")
-                else:
-                    # teacher has multiple subjects in this class
-                    # resort to subject name (if any)
-                    if subject_name_value is None:
+                    correct_subject_obj = None
 
-                        # TODO if the other entries for this teacher e.g. Deu & LF4 are empty for this year index
-                        # we can identify the correct subject because the other subjects have soll (should) 0 in this year index
-                        # we don't try to resolve if there are 0 hours for the other subject (if we have only 2 for a teacher)!
-                        #  because normally in the plan there would 0 hours
+                    if len(teacher_with_hours_subject_tuples) == 0:
+                        # teacher not found in subjects -> error
+                        if is_second_round:
+                            Logger.error(f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] not found in class subjects -> PLEASE FIX teacher key at cell: '{Logger.get_cell_full_coord(teacher_subject_pair_cell)} or in overview file [{ALL_OVERVIEW_NAME}]', IGNORING TEACHER")
+                        need_to_log_all_teacher_names_in_class = True
 
-                        # try to extract the teacher and subject from teacher_subject_pair_value value
-                        # e.g. Ma(Wind)
-                        # if we cannot extract the teacher or subject -> error
-                        # if we can but subject cell was not set -> set it
-                        found_correct_subject_obj = False
-                        possible_subjects = []
-                        for teacher_subject_tuple in teacher_with_hours_subject_tuples:
-                            _teacher_with_hours = teacher_subject_tuple[0]
-                            _subject_obj = teacher_subject_tuple[1]
-                            possible_subjects.append(_subject_obj['name'])
-
-                            if _subject_obj['name'] == maybe_subject_name:
-                                # we found a possible choice (subject) that has exactly this name... take it
-                                # subject_name_cell.value = correct_subject_obj['name'].strip() # no need to make it explicit if it's distinct
-                                # need_to_save_wb = True
-                                correct_subject_obj = _subject_obj
-                                subject_name_value = correct_subject_obj['name'].strip()
-
-                                # subject comes from the overview for each class -> subjecr should be correct here
-                                # if type(subject_name_value) != str:
-                                #     raise Exception(
-                                #         f"[{self.log_name}][Stundenerfassung][{class_key}] subject name must be a string, cell: {Logger.get_cell_full_coord(subject_name_cell)}, value: {subject_name_value}")
-
-                                Logger.debug(f"[{self.log_name}][Stundenerfassung][{class_key}] found possible subject '{subject_name_value}' for teacher key '{teacher_key}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' based on the name in the teacher subject pair value '{teacher_subject_pair_value}' -> using this subject")
-                                found_correct_subject_obj = True
-
-                        if not found_correct_subject_obj:
-                            Logger.error(
-                                f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}' -> PLEASE set the correct subject name for value '{teacher_subject_pair_value}' at cell: '{Logger.get_cell_full_coord(subject_name_cell)}', the choices are: {possible_subjects}")
+                        if is_second_round:
                             error_count += 1
-                            continue
+                        continue
+
+                    elif len(teacher_with_hours_subject_tuples) == 1:
+                        # this is good, we found the correct teacher and subject
+                        correct_teacher_with_hours = teacher_with_hours_subject_tuples[0][0]
+                        correct_subject_obj = teacher_with_hours_subject_tuples[0][1]
+
+                        if subject_name_value is None:
+                            # subject_name_cell.value = correct_subject_obj['name'].strip() # no need to make it explicit if it's distinct
+                            # need_to_save_wb = True
+                            subject_name_value = correct_subject_obj['name'].strip()
+                        else:
+                            # check if correct, if not -> fix
+                            if subject_name_value.strip() != correct_subject_obj['name'].strip():
+                                Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] subject name '{subject_name_value}' does not match the (correct by teacher and class) subject '{correct_subject_obj['name']}' found for teacher key '{teacher_key}' in class '{class_key}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> OVERWRITING FOR YOU")
+                                subject_name_cell.value = correct_subject_obj['name']
+                                need_to_save_wb = True
+
+                        if correct_subject_obj['name'] not in teacher_with_subjects_coords_dict[teacher_key]:
+                            teacher_with_subjects_coords_dict[teacher_key][correct_subject_obj['name']] = {
+                                'subject_name': correct_subject_obj['name'],
+                                'teacher_subject_pair_cell_coord': Logger.get_cell_full_coord(teacher_subject_pair_cell),
+                                'teacher_subject_pair_cell_value': teacher_subject_pair_value,
+                            }
+
+                        if is_second_round:
+                            Logger.log(f"[{self.log_name}][Stundenerfassung][{class_key}] found correct teacher key '{teacher_key}' with subject '{correct_subject_obj['name']}' for teacher + subject pair value '{teacher_subject_pair_value}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' (from overview file [{ALL_OVERVIEW_NAME}] this class has only this teacher for this subject)  -> using this subject")
                     else:
-                        # we have a subject here
-                        for teacher_subject_tuple in teacher_with_hours_subject_tuples:
-                            _teacher_with_hours = teacher_subject_tuple[0]
-                            _subject_obj = teacher_subject_tuple[1]
+                        # teacher has multiple subjects in this class
+                        # resort to subject name (if any)
+                        if subject_name_value is None:
 
-                            if _subject_obj['name'].strip() == subject_name_value.strip():
-                                correct_subject_obj = _subject_obj
-                                break
+                            # TODO if the other entries for this teacher e.g. Deu & LF4 are empty for this year index
+                            # we can identify the correct subject because the other subjects have soll (should) 0 in this year index
+                            # we don't try to resolve if there are 0 hours for the other subject (if we have only 2 for a teacher)!
+                            #  because normally in the plan there would 0 hours
 
-                        if correct_subject_obj is None:
+                            # try to extract the teacher and subject from teacher_subject_pair_value value
+                            # e.g. Ma(Wind)
+                            # if we cannot extract the teacher or subject -> error
+                            # if we can but subject cell was not set -> set it (we don't do it right now, not needed)
+                            found_correct_subject_obj = False
                             possible_subjects = []
-                            for teacher_subject_tuple in teacher_with_hours_subject_tuples:
+                            possible_subject_objs = []
+                            for i, teacher_subject_tuple in enumerate(teacher_with_hours_subject_tuples):
                                 _teacher_with_hours = teacher_subject_tuple[0]
                                 _subject_obj = teacher_subject_tuple[1]
                                 possible_subjects.append(_subject_obj['name'])
+                                possible_subject_objs.append(_subject_obj)
 
-                            Logger.error(
-                                f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}' but none of them match the provided subject name '{subject_name_value}' found in the excel sheet at cell '{Logger.get_cell_full_coord(subject_name_cell)}' -> PLEASE FIX the subject name, the choices are: {possible_subjects}")
-                            error_count += 1
-                            continue
+                                if _subject_obj['name'] == maybe_subject_name:
+                                    # we found a possible choice (subject) that has exactly this name (in overview file)... take it
+                                    # subject_name_cell.value = correct_subject_obj['name'].strip() # no need to make it explicit if it's distinct
+                                    # need_to_save_wb = True
+                                    correct_subject_obj = _subject_obj
+                                    subject_name_value = correct_subject_obj['name'].strip()
+
+                                    # subject comes from the overview for each class -> subjecr should be correct here
+                                    # if type(subject_name_value) != str:
+                                    #     raise Exception(
+                                    #         f"[{self.log_name}][Stundenerfassung][{class_key}] subject name must be a string, cell: {Logger.get_cell_full_coord(subject_name_cell)}, value: {subject_name_value}")
+
+                                    if is_second_round:
+                                        Logger.debug(f"[{self.log_name}][Stundenerfassung][{class_key}] found possible subject '{subject_name_value}' for teacher key '{teacher_key}' at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' based on the exact names in the teacher subject pair value '{teacher_subject_pair_value}' (subject name was taken from overview file) -> using this subject")
+
+                                    found_correct_subject_obj = True
+                                    if correct_subject_obj['name'] not in teacher_with_subjects_coords_dict[teacher_key]:
+                                        teacher_with_subjects_coords_dict[teacher_key][correct_subject_obj['name']] = {
+                                            'subject_name': correct_subject_obj['name'],
+                                            'teacher_subject_pair_cell_coord': Logger.get_cell_full_coord(
+                                                teacher_subject_pair_cell),
+                                            'teacher_subject_pair_cell_value': teacher_subject_pair_value,
+                                        }
+
+                            if not found_correct_subject_obj and is_second_round:
+                                already_known_subject_names = []
+                                # maybe we can reduce the remaining options because we can rule out other subject pairs?
+                                # ['Sport', 'LF7'] and we already know/processed the entry for 'LF7' then it must be 'Sport'
+                                already_known_subjects = []
+                                for subject_name, other_subjects_help in teacher_with_subjects_coords_dict[teacher_key].items():
+                                    already_known_subject_names.append(subject_name)
+                                    for _subject_obj in possible_subject_objs:
+                                        if subject_name == _subject_obj['name']:
+                                            # already processed / known
+                                            already_known_subjects.append(_subject_obj)
+                                            break
+
+                                for obj in already_known_subjects:
+                                    possible_subject_objs.remove(obj)
+
+                                if len(possible_subject_objs) == 1:
+                                    found_correct_subject_obj = True
+                                    correct_subject_obj = possible_subject_objs[0]
+                                    subject_name_value = correct_subject_obj['name']
+                                    Logger.log(f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}, but other subjects were already assigned, so we can identify the correct subject, choices were: {possible_subjects} -> auto selected '{subject_name_value}' [because already identified: {already_known_subject_names}]")
 
 
-                if teacher_subject_pair_value is None:
-                    Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'teacher subject pair' is None for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> ignoring this entry")
-                    continue
+                            if not found_correct_subject_obj:
+                                other_subjects_help_string = "other subjects from this teacher: "
+                                for subject_name, other_subjects_help in teacher_with_subjects_coords_dict[teacher_key].items():
+                                    other_subjects_help_string += f"'{other_subjects_help['teacher_subject_pair_cell_value']}' at cell '{other_subjects_help['teacher_subject_pair_cell_coord']}', "
 
-                if soll_value is None:
-                    Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll' is None for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_cell)}' -> ignoring this entry")
-                    continue
+                                if is_second_round:
+                                    Logger.error(
+                                        f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}' -> PLEASE set the correct subject name for value '{teacher_subject_pair_value}' at cell: '{Logger.get_cell_full_coord(subject_name_cell)}', the choices are: {possible_subjects}. {other_subjects_help_string}")
+                                    error_count += 1
+                                continue
+                        else:
+                            # we have a subject here (explicitly set)
+                            for teacher_subject_tuple in teacher_with_hours_subject_tuples:
+                                _teacher_with_hours = teacher_subject_tuple[0]
+                                _subject_obj = teacher_subject_tuple[1]
 
-                if ist_akkum_value is None:
-                    Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'ist akkum' is None for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_cell)}' -> ignoring this entry")
-                    continue
+                                if _subject_obj['name'].strip() == subject_name_value.strip():
+                                    correct_subject_obj = _subject_obj
+                                    if correct_subject_obj['name'] not in teacher_with_subjects_coords_dict[teacher_key]:
+                                        teacher_with_subjects_coords_dict[teacher_key][correct_subject_obj['name']] = {
+                                            'subject_name': correct_subject_obj['name'],
+                                            'teacher_subject_pair_cell_coord': Logger.get_cell_full_coord(
+                                                teacher_subject_pair_cell),
+                                            'teacher_subject_pair_cell_value': teacher_subject_pair_value,
+                                        }
+                                    break
 
-                if subject_name_value is None:
-                    Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'subject name' is None for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(subject_name_cell)}' -> ignoring this entry")
-                    continue
+                            if correct_subject_obj is None:
+                                possible_subjects = []
+                                for teacher_subject_tuple in teacher_with_hours_subject_tuples:
+                                    _teacher_with_hours = teacher_subject_tuple[0]
+                                    _subject_obj = teacher_subject_tuple[1]
+                                    possible_subjects.append(_subject_obj['name'])
 
-                # these should already be strings...
-                teacher_subject_pair = (str(teacher_key),str(subject_name_value))
-                if teacher_subject_pair in used_teacher_subject_pairs:
-                    # TODO ENABLE?
-                    # raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] duplicate entry for teacher key '{teacher_key}' and subject '{subject_name_value}' found in excel sheet at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> this should not happen, please fix the excel sheet, there should be only one entry for each teacher and subject combination")
-                    Logger.error(
-                        f"[{self.log_name}][Stundenerfassung][{class_key}] duplicate entry for teacher key '{teacher_key}' and subject '{subject_name_value}' found in excel sheet at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> this should not happen, please fix the excel sheet, there should be only one entry for each teacher and subject combination, IGNORING ENTRY")
-                    error_count += 1
-                    continue
+                                other_subjects_help_string = "other subjects from this teacher: "
+                                for subject_name, other_subjects_help in teacher_with_subjects_coords_dict[teacher_key].items():
+                                    other_subjects_help_string += f"'{other_subjects_help['teacher_subject_pair_cell_value']}' at cell '{other_subjects_help['teacher_subject_pair_cell_coord']}', "
 
-                used_teacher_subject_pairs.add(teacher_subject_pair)
+                                if is_second_round:
+                                    Logger.error(
+                                        f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}' but none of them match the provided subject name '{subject_name_value}' found in the excel sheet at cell '{Logger.get_cell_full_coord(subject_name_cell)}' -> PLEASE FIX the subject name, the choices are: {possible_subjects}. {other_subjects_help_string}")
+                                    error_count += 1
+                                continue
 
-                soll_info = {
-                    "lfd_nr": lfd_nr_value,
-                    # "teacher_name": teacher_name_value,
-                    "teacher_subject_pair": teacher_subject_pair_value.strip(),
-                    "soll": soll_value,
-                    "soll_per_week": soll_per_week_value,
-                    "curr_soll_per_week": curr_soll_per_week_value,
-                    "ist": ist_akkum_value,
-                    "teacher_key": teacher_key.strip(),
-                    "subject_name": subject_name_value.strip(),
-                }
-                curr_soll_data_array.append(soll_info)
+
+                    if teacher_subject_pair_value is None:
+                        Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'teacher subject pair' is None for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> ignoring this entry")
+                        continue
+
+                    if soll_value is None:
+                        Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'soll' is None for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_cell)}' -> ignoring this entry")
+                        continue
+
+                    if ist_akkum_value is None:
+                        Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'ist akkum' is None for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(soll_cell)}' -> ignoring this entry")
+                        continue
+
+                    if subject_name_value is None:
+                        Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] 'subject name' is None for lfd nr {lfd_nr_value} at cell '{Logger.get_cell_full_coord(subject_name_cell)}' -> ignoring this entry")
+                        continue
+
+                    # these should already be strings...
+                    teacher_subject_pair = (str(teacher_key),str(subject_name_value))
+                    if teacher_subject_pair in used_teacher_subject_pairs:
+                        # TODO ENABLE?
+                        # raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] duplicate entry for teacher key '{teacher_key}' and subject '{subject_name_value}' found in excel sheet at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> this should not happen, please fix the excel sheet, there should be only one entry for each teacher and subject combination")
+                        Logger.error(
+                            f"[{self.log_name}][Stundenerfassung][{class_key}] duplicate entry for teacher key '{teacher_key}' and subject '{subject_name_value}' found in excel sheet at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' -> this should not happen, please fix the excel sheet, there should be only one entry for each teacher and subject combination, IGNORING ENTRY")
+                        error_count += 1
+                        continue
+
+                    used_teacher_subject_pairs.add(teacher_subject_pair)
+
+                    soll_info = {
+                        "lfd_nr": lfd_nr_value,
+                        # "teacher_name": teacher_name_value,
+                        "teacher_subject_pair": teacher_subject_pair_value.strip(),
+                        "soll": soll_value,
+                        "soll_per_week": soll_per_week_value,
+                        "curr_soll_per_week": curr_soll_per_week_value,
+                        "ist": ist_akkum_value,
+                        "teacher_key": teacher_key.strip(),
+                        "subject_name": subject_name_value.strip(),
+                    }
+                    curr_soll_data_array.append(soll_info)
 
             if found_correct_year_index:
                 break
@@ -431,7 +530,7 @@ class ExcelExtractorStundenerfassung:
             "class_key": class_key,
             "correct_year_index": correct_year_index,
             "soll_data_array": curr_soll_data_array,
-        }
+        }, error_count > 0
 
     def add_soll_data_to_class_subject_teachers(self, all_classes, all_teachers_list):
 

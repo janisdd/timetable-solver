@@ -110,8 +110,12 @@ class ExcelExtractorGesamtuebersicht:
         #         all_teachers_dict[teacher_key] = teacher_obj
 
         # check if mappings file exists
-        self._ensure_mappings_file_exists_and_required_sheets(self.excel_file_mappings, self.all_classes,
+        was_created = self._ensure_mappings_file_exists_and_required_sheets(self.excel_file_mappings, self.all_classes,
                                                               self.subject_name_to_key_dict)
+
+        if was_created:
+            Logger.warn(f"[{self.log_name}][FIRST RUN] mapping file was created, fill in the correct/missing data, this is expected in the very first run")
+            raise Exception(f"[{self.log_name}][FIRST RUN] mapping file was created, fill in the correct/missing data, this is expected in the very first run")
 
         wb_mappings = openpyxl.load_workbook(self.excel_file_mappings, read_only=False, data_only=True)
 
@@ -219,6 +223,8 @@ class ExcelExtractorGesamtuebersicht:
 
             ws_class_mapping.cell(row=1,
                                   column=1).value = 'Die Klassennamen Teile sind in der Gesamtübersicht zu finden (3 Zeile)'
+            ws_class_mapping.cell(row=2,
+                                  column=1).value = 'Die Kürzel müssen mit denen in der Eingabe Datei (X_KW ...) übereinstimmen, z.B. Erz23A.'
             ws_class_mapping.cell(row=3,
                                   column=1).value = 'Kürzel frei lassen, damit nicht beachtet wird (Plan wird nicht ausgefüllt)'
 
@@ -251,6 +257,7 @@ class ExcelExtractorGesamtuebersicht:
 
             ws_subjects_mapping.cell(row=1, column=1).value = 'Der Fach Name ist der volle Name aus der Gesamtübersicht'
             ws_subjects_mapping.cell(row=2, column=1).value = 'Das Fach Kürzel wird für die Ausgabe in den Stundenplänen genutzt'
+            ws_subjects_mapping.cell(row=3, column=1).value = 'Für jedes Fach muss ein Kürzel eingetragen werden'
 
             ws_subjects_mapping.cell(row=9, column=1).value = 'Fach Kürzel'
             ws_subjects_mapping.cell(row=9, column=2).value = 'Fach Name'
@@ -271,6 +278,9 @@ class ExcelExtractorGesamtuebersicht:
 
         if some_changed:
             wb_mappings.save(excel_file_mappings)
+            return True
+
+        return False
 
     def extract_subject_key_to_subject_mapping_from_sheet(self, wb_mappings, subject_name_to_key_dict):
         mapping_worksheet = wb_mappings[MAPPINGS_SHEET_SUBJECTS]

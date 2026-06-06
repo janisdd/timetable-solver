@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -23,9 +24,9 @@ EXISTING_PLAN_FILE_SEARCH_SUBSTRING = "_KW"
 
 # true: sometimes we cannot map correctly e.g. LF7(Mo) and we can map it to (LF7 80 Stunden) or something
 # false: throw error after all files were processed so we can fix them
-ignore_errors_in_std_files = False
+DEFAULT_IGNORE_ERRORS_IN_STD_FILES = False
 # ['Sport', 'LF7'] and we already know/processed the entry for 'LF7' then it must be 'Sport'
-try_to_resolve_remaining_subjects_in_std_files = True
+DEFAULT_TRY_TO_RESOLVE_REMAINING_SUBJECTS_IN_STD_FILES = True
 
 SLOT_MULTIPLIER = 1
 if ONLY_USE_BLOCKS_OF_TWO:
@@ -1522,42 +1523,76 @@ def get_stundenplan_tuples_from_vars(stundenplanHelper):
 
 #######################################################################
 
-dir_prefix = "Tabellen"
-
-Logger.set_output_file(f"{dir_prefix}/log.txt")
-
-try:
-    all_overview_files = [f for f in os.listdir(dir_prefix) if ALL_OVER_VIEW_FILE_SEARCH_SUBSTRING in f]
-    existing_plan_file = [f for f in os.listdir(dir_prefix) if EXISTING_PLAN_FILE_SEARCH_SUBSTRING in f]
-
-    if len(all_overview_files) == 0:
-        raise Exception(f"No overview files found in {dir_prefix}, expected to find one with substring '{ALL_OVER_VIEW_FILE_SEARCH_SUBSTRING}'")
-    if len(existing_plan_file) == 0:
-        raise Exception(f"No existing plan file found in {dir_prefix}, expected to find one with substring '{EXISTING_PLAN_FILE_SEARCH_SUBSTRING}'")
-
-# prefix with dir_prefix
-    excel_extractor = ExcelExtractorGesamtuebersicht(
-        os.path.join(dir_prefix, all_overview_files[0]),
-        os.path.join(dir_prefix, MAPPINGS_FILE_NAME_WITH_EXTENSION), # will be created if not existing
-        os.path.join(dir_prefix, existing_plan_file[0])
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate a timetable from the Excel source files.")
+    parser.add_argument(
+        "--ignore-errors-in-std-files",
+        dest="ignore_errors_in_std_files",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_IGNORE_ERRORS_IN_STD_FILES,
+        help=(
+            "Ignore unresolved teacher/subject mapping errors in Std-Erfassung files. "
+            f"Default: {DEFAULT_IGNORE_ERRORS_IN_STD_FILES}."
+        ),
     )
-    excel_extractor.read_all()
-
-    excel_stundenerfassung = ExcelExtractorStundenerfassung(
-        dir_prefix,
+    parser.add_argument(
+        "--try-to-resolve-remaining-subjects-in-std-files",
+        dest="try_to_resolve_remaining_subjects_in_std_files",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_TRY_TO_RESOLVE_REMAINING_SUBJECTS_IN_STD_FILES,
+        help=(
+            "Try to resolve ambiguous remaining subjects in Std-Erfassung files. "
+            f"Default: {DEFAULT_TRY_TO_RESOLVE_REMAINING_SUBJECTS_IN_STD_FILES}."
+        ),
     )
-    excel_stundenerfassung.apply_filter_found_files_with_real_classes(excel_extractor.all_classes)
-    excel_stundenerfassung.read_all(ignore_errors_in_std_files, try_to_resolve_remaining_subjects_in_std_files)
+    return parser.parse_args()
 
-    stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung, dir_prefix)
-    stundenplaner.init_new_timetable_problem()
-    stundenplaner.setup_fixed_vars()
-    stundenplaner.setup_constraints()
-    stundenplaner.solve_timetable_problem_4()
 
-except Exception as e:
-    raise e
-finally:
-    Logger.close_output_file()
+def main():
+    args = parse_args()
+    ignore_errors_in_std_files = args.ignore_errors_in_std_files
+    try_to_resolve_remaining_subjects_in_std_files = args.try_to_resolve_remaining_subjects_in_std_files
+
+    dir_prefix = "Tabellen"
+
+    Logger.set_output_file(f"{dir_prefix}/log.txt")
+
+    try:
+        all_overview_files = [f for f in os.listdir(dir_prefix) if ALL_OVER_VIEW_FILE_SEARCH_SUBSTRING in f]
+        existing_plan_file = [f for f in os.listdir(dir_prefix) if EXISTING_PLAN_FILE_SEARCH_SUBSTRING in f]
+
+        if len(all_overview_files) == 0:
+            raise Exception(f"No overview files found in {dir_prefix}, expected to find one with substring '{ALL_OVER_VIEW_FILE_SEARCH_SUBSTRING}'")
+        if len(existing_plan_file) == 0:
+            raise Exception(f"No existing plan file found in {dir_prefix}, expected to find one with substring '{EXISTING_PLAN_FILE_SEARCH_SUBSTRING}'")
+
+    # prefix with dir_prefix
+        excel_extractor = ExcelExtractorGesamtuebersicht(
+            os.path.join(dir_prefix, all_overview_files[0]),
+            os.path.join(dir_prefix, MAPPINGS_FILE_NAME_WITH_EXTENSION), # will be created if not existing
+            os.path.join(dir_prefix, existing_plan_file[0])
+        )
+        excel_extractor.read_all()
+
+        excel_stundenerfassung = ExcelExtractorStundenerfassung(
+            dir_prefix,
+        )
+        excel_stundenerfassung.apply_filter_found_files_with_real_classes(excel_extractor.all_classes)
+        excel_stundenerfassung.read_all(ignore_errors_in_std_files, try_to_resolve_remaining_subjects_in_std_files)
+
+        stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung, dir_prefix)
+        stundenplaner.init_new_timetable_problem()
+        stundenplaner.setup_fixed_vars()
+        stundenplaner.setup_constraints()
+        stundenplaner.solve_timetable_problem_4()
+
+    except Exception as e:
+        raise e
+    finally:
+        Logger.close_output_file()
+
+
+if __name__ == "__main__":
+    main()
 
 # stundenplaner.write_timetable_solution_to_excel('example/07_KW 45_03.11.-07.11.2025_OUT.xlsm')

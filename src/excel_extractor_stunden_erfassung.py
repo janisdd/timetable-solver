@@ -129,7 +129,7 @@ class ExcelExtractorStundenerfassung:
                     all_classes.remove(class_obj)
                     Logger.warn(f"[{self.log_name}][FILTERING] class '{class_obj['key']}' removed from all_classes because no matching Std Erfassung file was found")
 
-    def read_all(self, ignore_errors_in_std_files):
+    def read_all(self, ignore_errors_in_std_files, try_to_resolve_remaining_subjects_in_std_files):
 
         some_has_error = False
 
@@ -140,7 +140,7 @@ class ExcelExtractorStundenerfassung:
             class_obj = obj["class_obj"]
             excel_file_path = obj["excel_file_path"]
 
-            stundenerfassung_obj, has_error = self.read_single_stundenerfassung(excel_file_path, class_obj, ignore_errors_in_std_files)
+            stundenerfassung_obj, has_error = self.read_single_stundenerfassung(excel_file_path, class_obj, ignore_errors_in_std_files, try_to_resolve_remaining_subjects_in_std_files)
 
             if has_error:
                 some_has_error = True
@@ -154,11 +154,13 @@ class ExcelExtractorStundenerfassung:
             raise Exception(f"[{self.log_name}][STUNDERFASSUNG] some 'std erfassung' files have errors, fix them")
 
 
-    def read_single_stundenerfassung(self, excel_files_stundenerfassung_path, class_obj, ignore_errors_in_std_files):
+    def read_single_stundenerfassung(self, excel_files_stundenerfassung_path, class_obj, ignore_errors_in_std_files, try_to_resolve_remaining_subjects_in_std_files):
         workbook = openpyxl.load_workbook(excel_files_stundenerfassung_path, read_only=False, data_only=True)
         ws = workbook[SHEET_HOURS_OVERVIEW]
 
         Logger.log(f"[{self.log_name}][STUNDERFASSUNG] loading 'std erfassung' excel file for class '{class_obj['key']}' from path: {excel_files_stundenerfassung_path}")
+        Logger.log(
+            f"[{self.log_name}][STUNDERFASSUNG] Note that ignoring errors here means that the teacher + subject pair is ignored onwards. This means they will not be schedules in ANY plan and also not counted in existing plans for this teacher, class, subject")
 
         def find_teacher_in_class_subjects(teacher_key, class_obj):
             teacher_with_hours_subject_tuples = []
@@ -217,6 +219,7 @@ class ExcelExtractorStundenerfassung:
 
                 lfd_nr_col = 1  # A just some number
                 subject_col = 27 # AA
+                ignore_subject_col = 28  # AB # ignore this row in the std erfassung
                 # teacher_key_col = 3 # C
                 # name_col = 4  # D
                 teacher_subject_pair_col = 3  # C
@@ -287,6 +290,9 @@ class ExcelExtractorStundenerfassung:
                     subject_name_cell = ws.cell(row=curr_row, column=subject_col)
                     subject_name_value = subject_name_cell.value
 
+                    ignore_subject_cell = ws.cell(row=curr_row, column=ignore_subject_col)
+                    ignore_subject_value = ignore_subject_cell.value
+
                     if subject_name_value is not None and type(subject_name_value) != str:
                         raise Exception(f"[{self.log_name}][Stundenerfassung][{class_key}] subject name must be a string, cell: {Logger.get_cell_full_coord(subject_name_cell)}, value: {subject_name_value}")
 
@@ -311,10 +317,16 @@ class ExcelExtractorStundenerfassung:
 
                     correct_subject_obj = None
 
+                    if ignore_subject_value is not None and ignore_subject_value == "ignore":
+                        if is_second_round:
+                            Logger.warn(f"[{self.log_name}][Stundenerfassung][{class_key}] entry for teacher key '{teacher_key}' [{teacher_subject_pair_value}] at cell '{Logger.get_cell_full_coord(teacher_subject_pair_cell)}' is set to be ignored -> IGNORING this entry in scheduling plans")
+                        continue
+
+
                     if len(teacher_with_hours_subject_tuples) == 0:
                         # teacher not found in subjects -> error
                         if is_second_round:
-                            Logger.error(f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] not found in class subjects -> PLEASE FIX teacher key at cell: '{Logger.get_cell_full_coord(teacher_subject_pair_cell)} or in overview file [{ALL_OVERVIEW_NAME}]', IGNORING TEACHER")
+                            Logger.error(f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] not found in class subjects -> PLEASE FIX teacher key at cell: '{Logger.get_cell_full_coord(teacher_subject_pair_cell)} or in overview file [{ALL_OVERVIEW_NAME}]', IGNORING teacher/entry")
                         need_to_log_all_teacher_names_in_class = True
 
                         if is_second_round:
@@ -393,7 +405,7 @@ class ExcelExtractorStundenerfassung:
                                             'teacher_subject_pair_cell_value': teacher_subject_pair_value,
                                         }
 
-                            if not found_correct_subject_obj and is_second_round:
+                            if not found_correct_subject_obj and is_second_round and try_to_resolve_remaining_subjects_in_std_files:
                                 already_known_subject_names = []
                                 # maybe we can reduce the remaining options because we can rule out other subject pairs?
                                 # ['Sport', 'LF7'] and we already know/processed the entry for 'LF7' then it must be 'Sport'
@@ -423,7 +435,7 @@ class ExcelExtractorStundenerfassung:
 
                                 if is_second_round:
                                     Logger.error(
-                                        f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}' -> PLEASE set the correct subject name for value '{teacher_subject_pair_value}' at cell: '{Logger.get_cell_full_coord(subject_name_cell)}', the choices are: {possible_subjects}. {other_subjects_help_string}")
+                                        f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}' -> PLEASE set the correct subject name for value '{teacher_subject_pair_value}' at cell: '{Logger.get_cell_full_coord(subject_name_cell)}', the choices are: {possible_subjects}. {other_subjects_help_string}. To completely ignore this entry, set {Logger.get_cell_full_coord(ignore_subject_cell)} to 'ignore'")
                                     error_count += 1
                                 continue
                         else:
@@ -456,7 +468,7 @@ class ExcelExtractorStundenerfassung:
 
                                 if is_second_round:
                                     Logger.error(
-                                        f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}' but none of them match the provided subject name '{subject_name_value}' found in the excel sheet at cell '{Logger.get_cell_full_coord(subject_name_cell)}' -> PLEASE FIX the subject name, the choices are: {possible_subjects}. {other_subjects_help_string}")
+                                        f"[{self.log_name}][Stundenerfassung][{class_key}] teacher key '{teacher_key}' [Abkürzung: {teacher_subject_pair_value}] has multiple subjects in class '{class_key}' but none of them match the provided subject name '{subject_name_value}' found in the excel sheet at cell '{Logger.get_cell_full_coord(subject_name_cell)}' -> PLEASE FIX the subject name, the choices are: {possible_subjects}. {other_subjects_help_string}. To completely ignore this entry, set {Logger.get_cell_full_coord(ignore_subject_cell)} to 'ignore'")
                                     error_count += 1
                                 continue
 

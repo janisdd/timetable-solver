@@ -24,6 +24,8 @@ EXISTING_PLAN_FILE_SEARCH_SUBSTRING = "_KW"
 # true: sometimes we cannot map correctly e.g. LF7(Mo) and we can map it to (LF7 80 Stunden) or something
 # false: throw error after all files were processed so we can fix them
 ignore_errors_in_std_files = False
+# ['Sport', 'LF7'] and we already know/processed the entry for 'LF7' then it must be 'Sport'
+try_to_resolve_remaining_subjects_in_std_files = True
 
 SLOT_MULTIPLIER = 1
 if ONLY_USE_BLOCKS_OF_TWO:
@@ -1545,7 +1547,7 @@ try:
         dir_prefix,
     )
     excel_stundenerfassung.apply_filter_found_files_with_real_classes(excel_extractor.all_classes)
-    excel_stundenerfassung.read_all(ignore_errors_in_std_files)
+    excel_stundenerfassung.read_all(ignore_errors_in_std_files, try_to_resolve_remaining_subjects_in_std_files)
 
     stundenplaner = StundenplanHelper(excel_extractor, excel_stundenerfassung, dir_prefix)
     stundenplaner.init_new_timetable_problem()
